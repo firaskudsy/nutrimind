@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cronometer-mcp"
+version = "0.1.0"
+description = "NutriMind Cronometer MCP server (mobile REST API) — food logging, diary, nutrition, weight"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+keywords = ["cronometer", "mcp", "nutrition", "health", "model-context-protocol"]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx[socks]>=0.27.0",
+    "uvicorn>=0.30.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+cronometer-mcp = "cronometer_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cronometer_mcp"]

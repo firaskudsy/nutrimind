@@ -1,0 +1,61 @@
+# NutriMind — self-hosted stack. `docker compose up --build` runs everything:
+# Postgres + Cronometer MCP + the Telegram bot (agent, scheduler, Google Health).
+name: nutrimind
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nutrimind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-nutrimind}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutrimind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cronometer-mcp:
+    build: ./mcp/cronometer
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Reachable only on the internal compose network — allow the service hostname.
+      MCP_DNS_REBINDING_PROTECTION: "false"
+
+  # The Telegram bot: agent (LiteLLM) + proactive scheduler + Google Health (npx).
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Reach the Cronometer MCP by service name inside the compose network.
+      CRONOMETER_MCP_URL: http://cronometer-mcp:8001/mcp
+      # Use the Postgres container (overrides the SQLite default from .env).
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
+    command: ["python", "-m", "app.telegram_bot"]
+    depends_on:
+      db:
+        condition: service_healthy
+      cronometer-mcp:
+        condition: service_started
+    volumes:
+      # Google Health OAuth tokens/config (from `./run.sh auth`). If absent, the
+      # agent simply skips Google Health.
+      - ${HOME}/.google-health-mcp:/root/.google-health-mcp
+
+  # The FastAPI backend (Phase 2 / Flutter app) — not needed for the Telegram bot.
+  # Uncomment to run it too.
+  # backend:
+  #   build: ./backend
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
+  #   depends_on: { db: { condition: service_healthy } }
+  #   ports: ["8000:8000"]
+
+volumes:
+  pgdata:

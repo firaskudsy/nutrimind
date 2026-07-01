@@ -1,0 +1,10 @@
+{
+  "_comment": "MCP server registration for the Google Health (Fitbit/Pixel) connector. Pinned for supply-chain safety. Consumed by the backend agent's MCP client config. Tokens are read from ~/.google-health-mcp on the host that ran `auth`.",
+  "mcpServers": {
+    "google_health": {
+      "command": "npx",
+      "args": ["-y", "google-health-mcp-unofficial@0.5.1"],
+      "transport": "stdio"
+    }
+  }
+}
