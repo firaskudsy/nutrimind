@@ -4,14 +4,16 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-**A self-hosted, AI-powered 24/7 nutrition & health assistant you chat with on Telegram.**
+**A self-hosted, AI-powered 24/7 nutrition & health assistant you chat with on Telegram or a web app.**
 
 Tell it what you're eating (in text or a photo) and it analyzes the meal against your goals,
 logs it to your **Cronometer** account, tracks your **weight**, and pulls your **Fitbit** sleep,
 steps, and activity for a full picture. It remembers your goals, allergies, and preferences,
 proactively nudges you (missed meals, morning weigh-in, a Sunday weekly review), and reports its
 own token usage and cost. Any LLM works — Claude, Gemini, or GPT — swappable with one config line
-via **LiteLLM**, over a clean **multi-MCP** tool architecture.
+via **LiteLLM**, over a clean **multi-MCP** tool architecture. Use it from **Telegram** or the
+built-in **web app**, and share it with **family** — members sign in with Google and you approve
+them.
 
 > ⚕️ Wellness guidance, not medical advice.
 
@@ -28,7 +30,9 @@ _Screenshots coming soon — chatting, logging a meal from a photo, the weekly r
 
 ## Features
 
-- 💬 **Chat on Telegram** — text or **food/label photos** (vision)
+- 💬 **Chat on Telegram or the web app** — text or **food/label photos** (vision)
+- 📱 **Web dashboard** — chat, weight/macro/cost charts, and settings, with a light/dark theme
+- 👨‍👩‍👧 **Multi-user / family** — members sign in with **Google**; the admin approves access
 - 🍽️ **Meal analysis + logging to Cronometer** — with the correct date & time you state
 - ⚖️ **Weight tracking** — logged to Cronometer
 - 😴 **Fitbit / Google Health** — sleep, steps, activity, heart rate feed the advice
@@ -41,14 +45,17 @@ _Screenshots coming soon — chatting, logging a meal from a photo, the weekly r
 ## Architecture
 
 ```
-Telegram  ─►  Bot (LiteLLM agent + scheduler)  ─►  MCP servers ─► Cronometer (mobile API)
-                        │                                        └► Google Health (Fitbit)
-                        └► Postgres (profile, chat, usage)
+Telegram  ─►  Bot ───┐
+                     ├─► LiteLLM agent + scheduler ─► MCP servers ─► Cronometer (mobile API)
+Web app  ─► Backend ─┘         │                                   └► Google Health (Fitbit)
+(nginx :3000)  (FastAPI :8000) └► Postgres (users, profile, chat, usage)
 ```
 
-Runs as three containers via Docker Compose: **Postgres**, the **Cronometer MCP**, and the
-**bot** (agent + proactive scheduler + Google Health). Layout: `backend/` (agent, tools, db),
-`mcp/` (`cronometer`, `google_health`), `app/` (Flutter app — planned Phase 2).
+Runs as five services via Docker Compose: **Postgres**, the **Cronometer MCP**, the **bot**
+(Telegram + proactive scheduler), the **backend** (FastAPI, serves `/api` on :8000), and the
+**web** app (nginx on :3000, proxies `/api` to the backend). Bot and backend share the same DB
+and agent. Layout: `backend/` (agent, tools, db, auth), `mcp/` (`cronometer`, `google_health`,
+`myair`), `web/` (React dashboard), `app/` (Flutter app — planned Phase 2).
 
 ---
 
@@ -158,6 +165,42 @@ one-time auth on your host (the Docker image already has it).
 
 > If you skip this, the assistant simply runs without Fitbit data (it degrades gracefully).
 
+### 5. Web app sign-in (owner + family)
+
+The web app has two ways in: an **owner password** (you, the admin) and **Google sign-in** (family
+members, who you then approve).
+
+**a. Owner password + session secret** — always required for the web app:
+
+```ini
+API_BEARER_TOKEN=a-long-random-password   # the "Sign in as owner" password (also the API token)
+SESSION_SECRET=another-long-random-string # signs login sessions — set a real random value in prod
+```
+
+**b. Google sign-in for family** — optional; enables the "Continue with Google" button:
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services →
+   Credentials → Create credentials → OAuth client ID** → Application type **Web application**.
+   (You can reuse the same project as Google Health; it must still be its own Web client.)
+2. Under **Authorized JavaScript origins**, add the exact origin(s) you open the app from —
+   e.g. `http://localhost:3000` (and any LAN IP or real domain). No redirect URI is needed for
+   this browser sign-in flow.
+3. **Create**, copy the **Client ID**, and set it plus your admin email in `.env`:
+   ```ini
+   ADMIN_EMAIL=you@gmail.com    # this Google account is auto-approved as the admin
+   GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+   ```
+4. While the **OAuth consent screen** is in **Testing**, add each family member's Google email
+   under **Test users** — otherwise Google blocks their sign-in before they ever reach the app.
+
+**How family access works:** a member opens the app, clicks **Continue with Google**, and lands on
+a "waiting for approval" screen. You sign in (owner password or your `ADMIN_EMAIL` Google account),
+open **Members**, and **Approve** them. Everyone's meals, chat, and usage are scoped to their own
+account.
+
+> `GOOGLE_CLIENT_ID` (browser sign-in) is **separate** from `GOOGLE_HEALTH_CLIENT_ID` (the Fitbit
+> connector) — different OAuth clients, even if in the same Google Cloud project.
+
 ---
 
 ## Run
@@ -165,12 +208,18 @@ one-time auth on your host (the Docker image already has it).
 ### Docker (recommended — everything at once)
 
 ```bash
-docker compose up --build     # Postgres + Cronometer MCP + bot
+docker compose up --build     # Postgres + Cronometer MCP + bot + backend + web
 docker compose logs -f bot    # watch it; on startup you'll see "Proactive scheduler started"
 docker compose down           # stop
 ```
 
-The bot polls Telegram — open your bot and send `/start`.
+The bot polls Telegram — open your bot and send `/start`. The web app is at
+**http://localhost:3000**.
+
+> After editing `.env`, recreate the affected service so it reloads: `docker compose up -d
+> --force-recreate backend` (a plain restart won't pick up `env_file` changes). If you recreate
+> `backend`, also `docker compose restart web` — nginx caches the backend's address at startup
+> and otherwise returns **502** on `/api` until it re-resolves.
 
 ### Local (two terminals, for development)
 
@@ -191,14 +240,16 @@ A React dashboard (chat, charts, and settings — with a light/dark theme) lives
 - **Dev:** run the backend (`cd backend && uv run nutrimind-backend`, needs the Cronometer MCP too),
   then `cd web && npm install && npm run dev` → **http://localhost:5173**
 
-Log in with your **`API_BEARER_TOKEN`** (set it in `.env` — it's the web password). From the app you
-can chat, see weight/macro/cost charts, and manage integrations + pick the LLM in **Settings**.
+Sign in as the **owner** with your `API_BEARER_TOKEN` password, or (if you set up Google sign-in
+in [Setup §5](#5-web-app-sign-in-owner--family)) let **family members** sign in with Google and
+approve them from **Members**. From the app you can chat, see weight/macro/cost charts, manage
+integrations, and pick the LLM in **Settings**.
 
 ---
 
 ## Using it
 
-Just talk to the bot:
+Just talk to it — on Telegram or in the web app's chat:
 
 - *“About to eat 3 eggs and 2 toast at 8am — good?”* → analyzes & logs it
 - Send a **photo** of a meal or nutrition label → identifies & logs it
@@ -218,6 +269,9 @@ Commands: `/help`, `/review` (weekly review), `/usage` (tokens & cost), `/whoami
 - **Google Health** connector is community/unofficial and in beta.
 - **Keep your repo private** — it’s wired to personal health accounts and credentials live in
   `.env` (which is git-ignored, along with the local database and OAuth tokens).
+- **Multi-user, shared integrations:** each member has their own login, profile, chat, and usage,
+  but the **Cronometer** and **Google Health** connectors use the single shared account configured
+  in `.env` — everyone's meals/weight log to that one account. Best for a household, not strangers.
 - Docker uses **Postgres**; local runs use **SQLite** — profile/history don’t carry between them.
 
 > ⚕️ NutriMind provides general wellness and nutrition guidance, not medical advice. For medical

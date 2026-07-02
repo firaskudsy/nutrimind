@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Sun,
 } from "lucide-react";
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useTheme } from "../lib/theme.jsx";
 
@@ -47,6 +48,26 @@ function ThemeToggle() {
       </span>
       <span className="text-sm">{dark ? "Dark" : "Light"} mode</span>
     </button>
+  );
+}
+
+function UserAvatar({ user }) {
+  const [broken, setBroken] = useState(false);
+  if (user.picture && !broken) {
+    return (
+      <img
+        src={user.picture}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="h-8 w-8 rounded-full object-cover"
+      />
+    );
+  }
+  return (
+    <div className="grid h-8 w-8 place-items-center rounded-full bg-accent/15 font-display text-accent">
+      {(user.name || user.email || "?")[0].toUpperCase()}
+    </div>
   );
 }
 
@@ -94,13 +115,7 @@ export default function Layout({ children, user, onLogout }) {
         <div className="flex flex-col gap-1 border-t pt-3">
           {user && (
             <div className="flex items-center gap-2.5 px-2 pb-2">
-              {user.picture ? (
-                <img src={user.picture} alt="" className="h-8 w-8 rounded-full object-cover" />
-              ) : (
-                <div className="grid h-8 w-8 place-items-center rounded-full bg-accent/15 font-display text-accent">
-                  {(user.name || user.email || "?")[0].toUpperCase()}
-                </div>
-              )}
+              <UserAvatar user={user} />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{user.name || "You"}</div>
                 <div className="truncate text-[11px] text-muted">{user.email}</div>

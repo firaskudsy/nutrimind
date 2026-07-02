@@ -10,7 +10,18 @@ const STATUS_STYLE = {
 };
 
 function Avatar({ user }) {
-  if (user.picture) return <img src={user.picture} alt="" className="h-10 w-10 rounded-full object-cover" />;
+  const [broken, setBroken] = useState(false);
+  if (user.picture && !broken) {
+    return (
+      <img
+        src={user.picture}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="h-10 w-10 rounded-full object-cover"
+      />
+    );
+  }
   const initial = (user.name || user.email || "?")[0].toUpperCase();
   return (
     <div className="grid h-10 w-10 place-items-center rounded-full bg-accent/15 font-display text-accent">
