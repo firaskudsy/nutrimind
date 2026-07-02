@@ -25,6 +25,7 @@ from app.schemas import (
     HealthOut,
     LoginIn,
     LoginOut,
+    ProfileUpdate,
     SettingsUpdate,
     WebChatIn,
     WebChatOut,
@@ -139,6 +140,21 @@ async def get_settings_view() -> dict:
 async def put_settings(payload: SettingsUpdate) -> dict:
     await settings_store.set_many(payload.values)
     return {"settings": await settings_store.public_view()}
+
+
+@app.get("/api/profile")
+async def get_profile(user=Depends(authz.require_approved)) -> dict:
+    """Everything the assistant remembers about the signed-in user."""
+    return {
+        "profile": memory.profile_summary(await memory.load_profile(user.id)),
+        "labs": await memory.latest_health_markers(user.id),
+    }
+
+
+@app.put("/api/profile")
+async def put_profile(payload: ProfileUpdate, user=Depends(authz.require_approved)) -> dict:
+    fields = payload.model_dump(exclude_unset=True)
+    return {"profile": await memory.replace_profile_fields(user.id, fields)}
 
 
 @app.post("/api/chat", response_model=WebChatOut)

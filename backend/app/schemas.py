@@ -59,6 +59,21 @@ class MetricOut(ORMModel):
     created_at: datetime
 
 
+# ---- Profile / memory ----
+class ProfileUpdate(BaseModel):
+    name: str | None = None
+    weight_unit: str | None = None
+    age: int | None = None
+    sex: str | None = None
+    height_cm: float | None = None
+    goals: str | None = None
+    allergies: str | None = None
+    conditions: str | None = None
+    preferences: str | None = None
+    daily_calorie_target: int | None = None
+    daily_protein_target_g: int | None = None
+
+
 # ---- Chat ----
 class ChatMessageIn(BaseModel):
     content: str

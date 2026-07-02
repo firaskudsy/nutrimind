@@ -153,6 +153,56 @@ async def apply_profile_update(
     return saved
 
 
+_EDITABLE_PROFILE_FIELDS = {
+    "name",
+    "weight_unit",
+    "age",
+    "sex",
+    "height_cm",
+    "goals",
+    "allergies",
+    "conditions",
+    "preferences",
+}
+
+
+async def replace_profile_fields(user_id: int, fields: dict) -> dict:
+    """Overwrite exactly the given profile fields; used by the settings UI's edit
+    form. Unlike `apply_profile_update` -- which the agent calls incrementally and
+    ignores blanks so it never erases a fact by omission -- this applies whatever
+    was submitted, including clearing a field to empty.
+    """
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        rows = await session.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        p = rows.scalar_one_or_none()
+        if p is None:
+            p = models.UserProfile(user_id=user_id)
+            session.add(p)
+        for key in _EDITABLE_PROFILE_FIELDS & fields.keys():
+            value = fields[key]
+            if key in ("weight_unit", "sex") and value:
+                value = value.lower()
+            setattr(p, key, value)
+        if "daily_calorie_target" in fields or "daily_protein_target_g" in fields:
+            targets = dict(p.targets or {})
+            if "daily_calorie_target" in fields:
+                if fields["daily_calorie_target"]:
+                    targets["calories"] = fields["daily_calorie_target"]
+                else:
+                    targets.pop("calories", None)
+            if "daily_protein_target_g" in fields:
+                if fields["daily_protein_target_g"]:
+                    targets["protein_g"] = fields["daily_protein_target_g"]
+                else:
+                    targets.pop("protein_g", None)
+            p.targets = targets
+        await session.commit()
+        return profile_summary(p)
+
+
 _ALLOWED_FIELDS = {
     "name",
     "weight_unit",

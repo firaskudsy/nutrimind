@@ -59,6 +59,30 @@ async def test_profile_health_fields(_db):
     assert saved["conditions"] == "sleep apnea, DDD in lower back"
 
 
+async def test_replace_profile_fields_overwrites_including_blanks(_db):
+    memory = _db
+    await memory.apply_profile_update(
+        1, name="Alex", goals="lose weight", allergies="peanuts", daily_protein_target_g=160
+    )
+
+    # The UI edit form can clear a field outright, unlike the agent's tool.
+    saved = await memory.replace_profile_fields(
+        1, {"name": "Alexis", "allergies": "", "daily_calorie_target": 2200}
+    )
+    assert saved["name"] == "Alexis"
+    assert saved["allergies"] is None  # cleared
+    assert saved["goals"] == "lose weight"  # untouched field preserved
+    assert saved["targets"] == {"protein_g": 160, "calories": 2200}
+
+    # Clearing a target removes it rather than storing a zero.
+    saved = await memory.replace_profile_fields(1, {"daily_protein_target_g": 0})
+    assert saved["targets"] == {"calories": 2200}
+
+    # Creates a profile from scratch for a user with none yet.
+    saved = await memory.replace_profile_fields(2, {"name": "Sam"})
+    assert saved["name"] == "Sam"
+
+
 async def test_health_markers_track_history_and_return_latest(_db):
     from datetime import date
 

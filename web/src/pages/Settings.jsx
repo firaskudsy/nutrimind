@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Cpu, KeyRound, Moon, Save, Sun } from "lucide-react";
+import { Brain, Check, Cpu, KeyRound, Moon, Save, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../lib/theme.jsx";
@@ -42,6 +42,166 @@ function ThemeCard() {
         ))}
       </div>
     </div>
+  );
+}
+
+const EMPTY_PROFILE_FORM = {
+  name: "",
+  weight_unit: "lbs",
+  age: "",
+  sex: "",
+  height_cm: "",
+  goals: "",
+  allergies: "",
+  conditions: "",
+  preferences: "",
+  daily_calorie_target: "",
+  daily_protein_target_g: "",
+};
+
+function MemoryCard() {
+  const [form, setForm] = useState(EMPTY_PROFILE_FORM);
+  const [labs, setLabs] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .getProfile()
+      .then(({ profile, labs }) => {
+        setForm({
+          name: profile.name || "",
+          weight_unit: profile.weight_unit || "lbs",
+          age: profile.age ?? "",
+          sex: profile.sex || "",
+          height_cm: profile.height_cm ?? "",
+          goals: profile.goals || "",
+          allergies: profile.allergies || "",
+          conditions: profile.conditions || "",
+          preferences: profile.preferences || "",
+          daily_calorie_target: profile.targets?.calories ?? "",
+          daily_protein_target_g: profile.targets?.protein_g ?? "",
+        });
+        setLabs(labs || {});
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const num = (v) => (v === "" ? null : Number(v));
+      await api.putProfile({
+        ...form,
+        age: num(form.age),
+        height_cm: num(form.height_cm),
+        daily_calorie_target: num(form.daily_calorie_target),
+        daily_protein_target_g: num(form.daily_protein_target_g),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="card p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/10 text-accent">
+            <Brain size={16} />
+          </span>
+          <div>
+            <h3 className="font-display text-lg leading-tight tracking-tight">Memory</h3>
+            <p className="text-xs text-muted">What the assistant remembers about you -- editable here or by chatting.</p>
+          </div>
+        </div>
+        <button onClick={save} disabled={busy} className="btn-primary">
+          {saved ? <Check size={16} /> : <Save size={16} />}
+          {saved ? "Saved" : busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="label mb-1.5 block">Name</label>
+          <input className="field" value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Weight unit</label>
+          <select className="field" value={form.weight_unit} onChange={(e) => set("weight_unit", e.target.value)}>
+            <option value="lbs">lbs</option>
+            <option value="kg">kg</option>
+          </select>
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Age</label>
+          <input type="number" className="field" value={form.age} onChange={(e) => set("age", e.target.value)} />
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Sex</label>
+          <input className="field" value={form.sex} onChange={(e) => set("sex", e.target.value)} placeholder="e.g. male, female" />
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Height (cm)</label>
+          <input type="number" className="field" value={form.height_cm} onChange={(e) => set("height_cm", e.target.value)} />
+        </div>
+        <div />
+        <div>
+          <label className="label mb-1.5 block">Daily calorie target</label>
+          <input
+            type="number"
+            className="field"
+            value={form.daily_calorie_target}
+            onChange={(e) => set("daily_calorie_target", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Daily protein target (g)</label>
+          <input
+            type="number"
+            className="field"
+            value={form.daily_protein_target_g}
+            onChange={(e) => set("daily_protein_target_g", e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        {[
+          ["goals", "Goals"],
+          ["allergies", "Allergies / avoid"],
+          ["conditions", "Health conditions"],
+          ["preferences", "Preferences"],
+        ].map(([key, label]) => (
+          <div key={key}>
+            <label className="label mb-1.5 block">{label}</label>
+            <textarea className="field" rows={2} value={form[key]} onChange={(e) => set(key, e.target.value)} />
+          </div>
+        ))}
+      </div>
+
+      {Object.keys(labs).length > 0 && (
+        <div className="mt-4">
+          <p className="label mb-2">Recent labs</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(labs).map(([marker, m]) => (
+              <span key={marker} className="chip">
+                {marker}: {m.value}
+                {m.unit ? ` ${m.unit}` : ""} ({m.date})
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
   );
 }
 
@@ -92,6 +252,7 @@ export default function Settings() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
+          <MemoryCard />
           {groups.map((group, gi) => {
             const items = settings.filter((s) => s.group === group);
             if (!items.length) return null;
