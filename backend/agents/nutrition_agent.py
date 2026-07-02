@@ -197,11 +197,23 @@ async def run_turn(
     model = await settings_store.agent_model(settings.agent_model)
     api_key = await settings_store.provider_api_key(model)
 
+    # api_base/reasoning_effort are local-model (ollama) concerns only -- applying
+    # a leftover local api_base to a cloud model would silently misroute its API
+    # calls, so both are gated on the model string rather than always sent.
+    is_local_model = model.startswith("ollama")
+    api_base = await settings_store.agent_api_base(settings.agent_api_base) if is_local_model else None
+
     messages: list[dict] = [
         {"role": "system", "content": await _system_content(profile, model)}
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": _user_content(user_text, image)})
+
+    # A tool-heavy turn can chain several completions (MAX_TOOL_ITERATIONS); a
+    # local "thinking" model re-reasoning from scratch before every single one
+    # would turn that into minutes, so it's off unless the model can't do
+    # without it.
+    reasoning_effort = "disable" if is_local_model else None
 
     async with contextlib.AsyncExitStack() as stack:
         tools, dispatch = await _gather_tools(stack, settings, user_id)
@@ -210,9 +222,11 @@ async def run_turn(
             resp = await litellm.acompletion(
                 model=model,
                 api_key=api_key,
+                api_base=api_base,
                 messages=messages,
                 tools=tools or None,
                 max_tokens=MAX_TOKENS,
+                reasoning_effort=reasoning_effort,
             )
             await usage.record_from_response(resp, model, source, user_id)
             msg = resp.choices[0].message

@@ -35,6 +35,9 @@ services:
       CRONOMETER_MCP_URL: http://cronometer-mcp:8001/mcp
       # Use the Postgres container (overrides the SQLite default from .env).
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
+      # Ollama runs natively on the Mac host (for GPU access), not in this
+      # compose stack -- host.docker.internal reaches it from the container.
+      AGENT_API_BASE: http://host.docker.internal:11434
     command: ["python", "-m", "app.telegram_bot"]
     depends_on:
       db:
@@ -55,6 +58,7 @@ services:
     environment:
       CRONOMETER_MCP_URL: http://cronometer-mcp:8001/mcp
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
+      AGENT_API_BASE: http://host.docker.internal:11434
     depends_on:
       db:
         condition: service_healthy
