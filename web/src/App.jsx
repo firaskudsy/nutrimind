@@ -6,6 +6,7 @@ import Chat from "./pages/Chat.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Login from "./pages/Login.jsx";
 import Pending from "./pages/Pending.jsx";
+import Prompts from "./pages/Prompts.jsx";
 import Settings from "./pages/Settings.jsx";
 import { api, clearToken, getToken } from "./lib/api.js";
 
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/settings" element={<Settings />} />
         {user.role === "admin" && <Route path="/members" element={<Admin />} />}
+        {user.role === "admin" && <Route path="/prompts" element={<Prompts />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

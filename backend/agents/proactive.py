@@ -14,35 +14,24 @@ and layer qualitative, condition-aware judgment (blood markers, injuries) on top
 
 from datetime import date, timedelta
 
-from agents import memory
+from agents import memory, prompts_store
 from agents.nutrition_agent import run_turn
 from agents.trends import _fetch_weight
 
 NO_NUDGE = "NO_NUDGE"
 
-WEIGHT_PROMPT = (
-    "It's morning. Send the user one short, friendly line asking them to reply with "
-    "today's body weight so you can log it to Cronometer. Output only that message."
-)
 
-WEEKLY_REVIEW = (
-    "Produce the user's weekly health review. Use Cronometer for the last 7 days of "
-    "nutrition (calories/protein consistency) and weight history, and Google Health for "
-    "sleep, steps, and activity. Summarize concisely: diet consistency, weight trend, "
-    "sleep and activity, then 2-3 specific, encouraging suggestions for next week. "
-    "Friendly and tight. If some data is unavailable, work with what you have."
-)
+async def weight_prompt_instruction() -> str:
+    return await prompts_store.get_effective("weight_prompt")
 
 
-def meal_check(meal: str) -> str:
+async def weekly_review_instruction() -> str:
+    return await prompts_store.get_effective("weekly_review")
+
+
+async def meal_check(meal: str) -> str:
     """Instruction to nudge only if the given meal isn't logged yet today."""
-    return (
-        f"It's a check-in time. Use get_food_log to read TODAY's Cronometer diary. "
-        f"If the user has not logged any {meal} yet today, reply with one short, friendly "
-        f"line nudging them to log their {meal} (or tell you what they had). "
-        f"If they have already logged {meal}, reply with exactly this and nothing else: "
-        f"{NO_NUDGE}"
-    )
+    return await prompts_store.render("meal_check", meal=meal, sentinel=NO_NUDGE)
 
 
 async def proactive_message(
@@ -145,29 +134,20 @@ async def diet_plan(user_id: int) -> str:
     )
     conditions_text = summary.get("conditions") or "none recorded"
 
-    instruction = (
-        "Produce the user's personalized weight-loss/diet plan as calorie and protein "
-        "targets. Use EXACTLY these precomputed numbers -- do not recompute or alter them:\n"
-        f"- Current weight: {weight_native} {unit} (as of {latest_day.isoformat()})\n"
-        f"- Maintenance: ~{tiers['maintenance']} calories/day\n"
-        f"- Moderate loss (0.5-1 lb/week): ~{tiers['moderate_low']}-{tiers['moderate_high']} "
-        "calories/day\n"
-        "- Aggressive loss (1-1.5 lbs/week, max safe deficit): "
-        f"~{tiers['aggressive_low']}-{tiers['aggressive_high']} calories/day\n"
-        f"- Protein target: {protein_lo}-{protein_hi}g daily\n\n"
-        f"Health conditions on file: {conditions_text}\n"
-        f"Recent lab/blood-test values on file: {labs_text}\n\n"
-        "Present the three tiers, then recommend ONE specific target with a brief reason "
-        "tied to their conditions (e.g. sustainability and joint/back load if a back "
-        "condition is on file). If lab values suggest a cardiometabolic pattern (e.g. "
-        "elevated LDL/triglycerides, low HDL), let that inform the dietary emphasis "
-        "(fiber, added sugar, saturated fat) without diagnosing anything or naming a "
-        "specific medical condition -- and tell them to discuss the labs with their "
-        "doctor. If a condition limits exercise, don't recommend specific exercise "
-        "intensity -- defer to their physician/physical therapist. Give the protein "
-        "target with a one-line reason (muscle preservation, satiety). End with the "
-        "standard wellness disclaimer: this is general guidance, not medical advice. "
-        "Match the style already used elsewhere: concise, plain text, no markdown."
+    instruction = await prompts_store.render(
+        "plan_instruction",
+        weight=weight_native,
+        unit=unit,
+        as_of=latest_day.isoformat(),
+        maintenance=tiers["maintenance"],
+        moderate_low=tiers["moderate_low"],
+        moderate_high=tiers["moderate_high"],
+        aggressive_low=tiers["aggressive_low"],
+        aggressive_high=tiers["aggressive_high"],
+        protein_lo=protein_lo,
+        protein_hi=protein_hi,
+        conditions=conditions_text,
+        labs=labs_text,
     )
     reply = (await run_turn(instruction, user_id=user_id, source="plan")).strip()
     return reply or "Sorry -- couldn't build your plan this time. Try again in a moment."
@@ -211,26 +191,12 @@ async def analyze_day(user_id: int) -> str:
     if protein_target:
         target_text += f", ~{protein_target}g protein"
 
-    instruction = (
-        "Analyze what the user has eaten TODAY. Call get_food_log once for today's "
-        "Cronometer diary (foods, amounts, meal groups, energy_summary, nutrition_summary) "
-        "-- use its real data, don't guess.\n\n"
-        f"Calorie/protein target: {target_text}\n"
-        f"Weight-loss goal: {summary.get('goals') or 'none recorded'}\n"
-        f"Health conditions: {summary.get('conditions') or 'none recorded'}\n"
-        f"Allergies/avoid: {summary.get('allergies') or 'none recorded'}\n\n"
-        "If nothing is logged yet today, say so plainly and stop -- don't invent a score. "
-        "Otherwise reply in plain text (no markdown):\n"
-        "1. A score out of 10 for today's eating so far, weighing the calorie/protein "
-        "target, the weight-loss goal, and the health conditions/allergies above -- also "
-        "weigh how meals are spaced across the day (long gaps, everything back-loaded "
-        "late at night, a skipped meal), not just the totals.\n"
-        "2. The specific items that hurt the score, each with a one-line reason (over "
-        "target, conflicts with a condition or allergy, poor timing, etc).\n"
-        "3. One concrete swap/alternative for each flagged item.\n"
-        "4. A one-line total: calories/protein consumed vs. target, and calories "
-        "remaining.\n"
-        "End with the standard wellness disclaimer: general guidance, not medical advice."
+    instruction = await prompts_store.render(
+        "analyze_instruction",
+        target=target_text,
+        goals=summary.get("goals") or "none recorded",
+        conditions=summary.get("conditions") or "none recorded",
+        allergies=summary.get("allergies") or "none recorded",
     )
     reply = (await run_turn(instruction, user_id=user_id, source="analyze")).strip()
     return reply or "Sorry -- couldn't analyze today's meals right now. Try again in a moment."

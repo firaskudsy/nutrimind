@@ -10,6 +10,15 @@ const SUGGESTIONS = [
   "How did I sleep this week?",
 ];
 
+const COMMANDS = [
+  { cmd: "/plan", label: "Plan" },
+  { cmd: "/analyze", label: "Analyze" },
+  { cmd: "/macros", label: "Macros" },
+  { cmd: "/trends", label: "Trends" },
+  { cmd: "/review", label: "Review" },
+  { cmd: "/usage", label: "Usage" },
+];
+
 function readImage(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -22,7 +31,7 @@ function readImage(file) {
   });
 }
 
-function Bubble({ role, content }) {
+function Bubble({ role, content, image }) {
   const user = role === "user";
   return (
     <motion.div
@@ -38,6 +47,7 @@ function Bubble({ role, content }) {
             : "rounded-bl-md border bg-surface text-ink"
         }`}
       >
+        {image && <img src={image} alt="" className="mb-2 rounded-xl" />}
         {content}
       </div>
     </motion.div>
@@ -69,8 +79,9 @@ export default function Chat() {
     const img = image;
     setImage(null);
     try {
-      const { reply } = await api.chat(msg, img);
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      const { reply, image_b64 } = await api.chat(msg, img);
+      const replyImage = image_b64 ? `data:image/png;base64,${image_b64}` : null;
+      setMessages((m) => [...m, { role: "assistant", content: reply, image: replyImage }]);
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", content: `⚠ ${e.message}` }]);
     } finally {
@@ -105,7 +116,7 @@ export default function Chat() {
           </div>
         )}
         {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} content={m.content} />
+          <Bubble key={i} role={m.role} content={m.content} image={m.image} />
         ))}
         {busy && (
           <div className="flex justify-start">
@@ -138,12 +149,25 @@ export default function Chat() {
         </div>
       )}
 
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {COMMANDS.map(({ cmd, label }) => (
+          <button
+            key={cmd}
+            onClick={() => send(cmd)}
+            disabled={busy}
+            className="chip hover:border-accent hover:text-ink"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
           send();
         }}
-        className="mt-3 flex items-end gap-2"
+        className="mt-2 flex items-end gap-2"
       >
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
         <button type="button" onClick={() => fileRef.current?.click()} className="btn-ghost h-11 w-11 p-0" aria-label="Attach photo">
