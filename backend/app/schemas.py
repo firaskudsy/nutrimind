@@ -77,3 +77,31 @@ class HealthOut(BaseModel):
     status: str
     db: bool
     mcp: dict[str, bool]
+
+
+# ---- Web app ----
+class LoginIn(BaseModel):
+    password: str
+
+
+class GoogleLoginIn(BaseModel):
+    credential: str  # Google ID token from the Sign-In button
+
+
+class LoginOut(BaseModel):
+    token: str
+    user: dict
+
+
+class WebChatIn(BaseModel):
+    message: str = ""
+    image_b64: str | None = None
+    image_media_type: str = "image/jpeg"
+
+
+class WebChatOut(BaseModel):
+    reply: str
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, str]

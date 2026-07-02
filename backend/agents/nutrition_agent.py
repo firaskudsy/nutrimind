@@ -21,6 +21,7 @@ import litellm
 
 from agents import memory, usage
 from agents.prompts import build_system_prompt
+from app import settings_store
 from app.config import get_settings
 from db import models
 from mcp_clients import registry
@@ -191,8 +192,12 @@ async def run_turn(
     if profile is None:
         profile = await memory.load_profile()
 
+    # Model + provider key are runtime-configurable from the web UI (DB over env).
+    model = await settings_store.agent_model(settings.agent_model)
+    api_key = await settings_store.provider_api_key(model)
+
     messages: list[dict] = [
-        {"role": "system", "content": _system_content(profile, settings.agent_model)}
+        {"role": "system", "content": _system_content(profile, model)}
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": _user_content(user_text, image)})
@@ -202,12 +207,13 @@ async def run_turn(
 
         for _ in range(MAX_TOOL_ITERATIONS):
             resp = await litellm.acompletion(
-                model=settings.agent_model,
+                model=model,
+                api_key=api_key,
                 messages=messages,
                 tools=tools or None,
                 max_tokens=MAX_TOKENS,
             )
-            await usage.record_from_response(resp, settings.agent_model, source)
+            await usage.record_from_response(resp, model, source)
             msg = resp.choices[0].message
             messages.append(_assistant_dict(msg))
 

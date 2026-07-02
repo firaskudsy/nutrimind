@@ -183,6 +183,17 @@ cd backend && uv sync && uv run python -m app.telegram_bot
 
 See `backend/README.md` for the CLI test harness, model switching, and scheduler details.
 
+### Web app
+
+A React dashboard (chat, charts, and settings — with a light/dark theme) lives in `web/`.
+
+- **Docker:** it's part of `docker compose up` → open **http://localhost:3000**
+- **Dev:** run the backend (`cd backend && uv run nutrimind-backend`, needs the Cronometer MCP too),
+  then `cd web && npm install && npm run dev` → **http://localhost:5173**
+
+Log in with your **`API_BEARER_TOKEN`** (set it in `.env` — it's the web password). From the app you
+can chat, see weight/macro/cost charts, and manage integrations + pick the LLM in **Settings**.
+
 ---
 
 ## Using it

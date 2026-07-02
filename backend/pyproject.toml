@@ -21,6 +21,8 @@ dependencies = [
     "litellm>=1.55.0",
     "python-telegram-bot>=21.0",
     "apscheduler>=3.10,<4",
+    "pyjwt>=2.8.0",
+    "google-auth>=2.30.0",
 ]
 
 [project.scripts]

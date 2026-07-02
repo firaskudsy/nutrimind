@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Refined Wellness — light */
+  --bg: 246 244 236;
+  --surface: 255 253 247;
+  --raised: 252 250 242;
+  --ink: 20 32 27;
+  --muted: 107 122 114;
+  --line: 228 224 212;
+  --accent: 20 125 90;
+  --amber: 198 124 56;
+  --glow: 20 125 90;
+}
+
+.dark {
+  /* Refined Wellness — deep forest */
+  --bg: 13 19 17;
+  --surface: 20 28 25;
+  --raised: 27 37 33;
+  --ink: 237 235 227;
+  --muted: 138 154 146;
+  --line: 35 48 43;
+  --accent: 52 211 153;
+  --amber: 224 160 80;
+  --glow: 52 211 153;
+}
+
+* {
+  border-color: rgb(var(--line));
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: rgb(var(--bg));
+  color: rgb(var(--ink));
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* Atmospheric radial glow, anchored top-left, tinted by the accent. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgb(var(--glow) / 0.14), transparent 60%),
+    radial-gradient(50rem 40rem at 100% 0%, rgb(var(--amber) / 0.07), transparent 55%);
+  pointer-events: none;
+}
+
+/* Fine grain overlay for tactile depth. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.04;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgb(var(--accent) / 0.24);
+}
+
+/* Slim, themed scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 999px;
+  border: 3px solid rgb(var(--bg));
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border bg-surface shadow-soft;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-bg hover:brightness-110 active:brightness-95;
+  }
+  .btn-ghost {
+    @apply btn border bg-transparent text-ink hover:bg-raised;
+  }
+  .field {
+    @apply w-full rounded-xl border bg-bg px-3.5 py-2.5 text-sm text-ink placeholder:text-muted/70
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
+  }
+  .label {
+    @apply text-xs font-semibold uppercase tracking-wider text-muted;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium text-muted;
+  }
+}
