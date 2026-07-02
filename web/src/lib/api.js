@@ -42,6 +42,8 @@ export const api = {
   adminSetStatus: (id, action) => req("POST", `/admin/users/${id}/${action}`),
   getSettings: () => req("GET", "/settings"),
   putSettings: (values) => req("PUT", "/settings", { values }),
+  getProfile: () => req("GET", "/profile"),
+  putProfile: (values) => req("PUT", "/profile", values),
   chat: (message, image) =>
     req("POST", "/chat", {
       message,
