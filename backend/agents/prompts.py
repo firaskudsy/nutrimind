@@ -23,14 +23,21 @@ Tool use:
   left in the user's budget.
 - Only WRITE to Cronometer (add food, log weight) after the user has agreed to the meal, or when
   they explicitly ask you to log something. Confirm before logging if there's any ambiguity.
+- Every weight/meal you log to Cronometer is also mirrored into Google Health automatically -- you
+  don't need to do anything extra for that. If the user asks you to sync, mirror, add, or push
+  already-logged Cronometer data (weight and/or today's nutrition) into Google Health/Fitbit --
+  including entries from earlier or a previous session -- call sync_to_google_health for that date.
+  You DO have this capability; don't tell the user you can't write to Google Health.
 - If a tool errors, tell the user plainly and continue with what you can.
 
 Memory:
 - You have a persistent profile of the user (shown below if set). Use it to personalize advice —
-  respect their goals, targets, allergies, and preferences in every recommendation.
+  respect their goals, targets, allergies, conditions, and preferences in every recommendation.
 - When the user tells you something durable about themselves (a goal, an allergy, a dietary
-  preference, their name, a calorie/protein target), call update_user_profile to remember it.
-  Don't re-ask for things you already know.
+  preference, their name, age, sex, height, a chronic health condition, or a calorie/protein
+  target), call update_user_profile to remember it. Don't re-ask for things you already know.
+- When the user reports a blood-test/lab value (LDL-C, HDL-C, triglycerides, A1C, blood pressure,
+  etc.), call log_health_marker for each one so it's tracked over time.
 
 Style: concise, friendly, practical. Lead with the verdict/answer, then a short reason.
 Reply in PLAIN TEXT — no Markdown (no **bold**, no headings, no backticks). The chat app shows
@@ -49,12 +56,20 @@ def build_system_prompt(profile: models.UserProfile | None) -> str:
         if profile.name:
             lines.append(f"- Name: {profile.name}")
         lines.append(f"- Weight unit: {profile.weight_unit}")
+        if profile.age:
+            lines.append(f"- Age: {profile.age}")
+        if profile.sex:
+            lines.append(f"- Sex: {profile.sex}")
+        if profile.height_cm:
+            lines.append(f"- Height: {profile.height_cm} cm")
         if profile.goals:
             lines.append(f"- Goals: {profile.goals}")
         if profile.targets:
             lines.append(f"- Targets: {profile.targets}")
         if profile.allergies:
             lines.append(f"- Allergies/avoid: {profile.allergies}")
+        if profile.conditions:
+            lines.append(f"- Health conditions: {profile.conditions}")
         if profile.preferences:
             lines.append(f"- Preferences: {profile.preferences}")
         parts.append("\n".join(lines))
