@@ -26,19 +26,20 @@ async def _send(app: Application, text: str) -> None:
 
 
 async def run_weight_prompt(app: Application, user_id: int) -> None:
-    msg = await proactive.proactive_message(proactive.WEIGHT_PROMPT, user_id)
+    msg = await proactive.proactive_message(await proactive.weight_prompt_instruction(), user_id)
     if msg:
         await _send(app, msg)
 
 
 async def run_meal_check(app: Application, meal: str, user_id: int) -> None:
-    msg = await proactive.proactive_message(proactive.meal_check(meal), user_id)
+    msg = await proactive.proactive_message(await proactive.meal_check(meal), user_id)
     if msg:
         await _send(app, msg)
 
 
 async def run_weekly_review(app: Application, user_id: int) -> None:
-    msg = await proactive.proactive_message(proactive.WEEKLY_REVIEW, user_id, source="review")
+    instruction = await proactive.weekly_review_instruction()
+    msg = await proactive.proactive_message(instruction, user_id, source="review")
     if msg:
         await _send(app, f"📊 Your weekly review\n\n{msg}")
 

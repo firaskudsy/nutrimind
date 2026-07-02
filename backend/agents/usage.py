@@ -123,3 +123,21 @@ async def usage_summary(user_id: int) -> dict:
             label: await _totals_since(session, since, user_id)
             for label, since in windows.items()
         }
+
+
+def _fmt_period(label: str, d: dict) -> str:
+    return (
+        f"{label}: {d['calls']} calls · {d['total']:,} tokens "
+        f"(in {d['prompt']:,} / out {d['completion']:,}) · ${d['cost']:.4f}"
+    )
+
+
+def format_summary(data: dict, model: str) -> str:
+    """The /usage report text, shared by the Telegram and web chat surfaces."""
+    return (
+        "📊 Usage & cost\n\n"
+        f"{_fmt_period('Today', data['today'])}\n"
+        f"{_fmt_period('Last 7 days', data['week'])}\n"
+        f"{_fmt_period('Last 30 days', data['month'])}\n\n"
+        f"Model: {model}"
+    )

@@ -116,7 +116,12 @@ class WebChatIn(BaseModel):
 
 class WebChatOut(BaseModel):
     reply: str
+    image_b64: str | None = None
 
 
 class SettingsUpdate(BaseModel):
+    values: dict[str, str]
+
+
+class PromptsUpdate(BaseModel):
     values: dict[str, str]

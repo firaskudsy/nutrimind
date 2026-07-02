@@ -4,6 +4,7 @@ import {
   LogOut,
   MessageCircle,
   Moon,
+  ScrollText,
   Settings2,
   ShieldCheck,
   Sun,
@@ -74,7 +75,11 @@ function UserAvatar({ user }) {
 export default function Layout({ children, user, onLogout }) {
   const nav =
     user?.role === "admin"
-      ? [...BASE_NAV, { to: "/members", label: "Members", icon: ShieldCheck }]
+      ? [
+          ...BASE_NAV,
+          { to: "/members", label: "Members", icon: ShieldCheck },
+          { to: "/prompts", label: "Prompts", icon: ScrollText },
+        ]
       : BASE_NAV;
   return (
     <div className="mx-auto flex min-h-screen max-w-[1400px] gap-6 px-4 py-5 md:px-6">

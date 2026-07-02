@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents import memory, usage
+from agents import macros, memory, proactive, prompts_store, trends, usage
 from agents.nutrition_agent import ImageInput, run_turn
 from app import authz, settings_store
 from app.config import get_settings
@@ -26,6 +26,7 @@ from app.schemas import (
     LoginIn,
     LoginOut,
     ProfileUpdate,
+    PromptsUpdate,
     SettingsUpdate,
     WebChatIn,
     WebChatOut,
@@ -142,6 +143,19 @@ async def put_settings(payload: SettingsUpdate) -> dict:
     return {"settings": await settings_store.public_view()}
 
 
+@app.get("/api/prompts", dependencies=[Depends(authz.require_admin)])
+async def get_prompts() -> dict:
+    """The editable prompt templates (system prompt, /plan, /analyze, etc)."""
+    return {"prompts": await prompts_store.public_view()}
+
+
+@app.put("/api/prompts", dependencies=[Depends(authz.require_admin)])
+async def put_prompts(payload: PromptsUpdate) -> dict:
+    """Overrides apply to every user -- prompts are global, not per-user."""
+    await prompts_store.set_many(payload.values)
+    return {"prompts": await prompts_store.public_view()}
+
+
 @app.get("/api/profile")
 async def get_profile(user=Depends(authz.require_approved)) -> dict:
     """Everything the assistant remembers about the signed-in user."""
@@ -157,9 +171,66 @@ async def put_profile(payload: ProfileUpdate, user=Depends(authz.require_approve
     return {"profile": await memory.replace_profile_fields(user.id, fields)}
 
 
+WEB_HELP_TEXT = (
+    "I'm NutriMind — your nutrition & health assistant. You can:\n\n"
+    "• Tell me what you plan to eat (and when) — I'll analyze it and log it to Cronometer\n"
+    "• Send a photo of a meal or a nutrition label — I'll identify and log it\n"
+    "• Report your weight — I'll log it\n"
+    "• Ask about today's calories/nutrition, your weight trend, or your Fitbit sleep/steps\n"
+    "• Tell me your goals, allergies, and preferences — I'll remember them\n\n"
+    "Commands:\n"
+    "/plan — your personalized calorie & protein plan\n"
+    "/analyze — rate today's eating 1-10 vs. your plan, with fixes\n"
+    "/macros — today's net carbs, fiber & protein by food item\n"
+    "/trends — charts of your weight, calories & sleep (week / month)\n"
+    "/review — weekly review (diet + weight + Fitbit)\n"
+    "/usage — token usage & cost (today / 7d / 30d)\n"
+    "/help — this message\n\n"
+    "Wellness guidance, not medical advice."
+)
+
+# Same commands as the Telegram bot, available by typing them in the web chat.
+_COMMANDS = {"/plan", "/analyze", "/macros", "/trends", "/review", "/usage", "/help"}
+
+
+async def _run_command(cmd: str, user_id: int) -> tuple[str, bytes | None]:
+    """Dispatch a slash command exactly like the Telegram bot; returns (text, png|None)."""
+    if cmd == "/plan":
+        return await proactive.diet_plan(user_id), None
+    if cmd == "/analyze":
+        return await proactive.analyze_day(user_id), None
+    if cmd == "/macros":
+        return await macros.todays_macros(), None
+    if cmd == "/review":
+        instruction = await proactive.weekly_review_instruction()
+        msg = await proactive.proactive_message(instruction, user_id, source="review")
+        return msg or "Not enough data yet for a review.", None
+    if cmd == "/usage":
+        data = await usage.usage_summary(user_id)
+        model = await settings_store.agent_model(get_settings().agent_model)
+        return usage.format_summary(data, model), None
+    if cmd == "/help":
+        return WEB_HELP_TEXT, None
+    png = await trends.generate_trends_png(user_id)
+    return "Your weight, calories & sleep — last week / month.", png
+
+
 @app.post("/api/chat", response_model=WebChatOut)
 async def web_chat(payload: WebChatIn, user=Depends(authz.require_approved)) -> WebChatOut:
     """One agent turn from the web UI (scoped to the signed-in user)."""
+    cmd = payload.message.strip().split()[0].lower() if payload.message.strip() else ""
+    if cmd in _COMMANDS and not payload.image_b64:
+        try:
+            reply, png = await _run_command(cmd, user.id)
+        except Exception as exc:  # noqa: BLE001 - surface failures to the user
+            logger.exception("web command %s failed", cmd)
+            reply, png = f"Sorry — {cmd} failed: {exc}", None
+        await memory.save_message(user.id, "user", payload.message)
+        if reply:
+            await memory.save_message(user.id, "assistant", reply)
+        image_b64 = base64.standard_b64encode(png).decode("utf-8") if png else None
+        return WebChatOut(reply=reply or "(no reply)", image_b64=image_b64)
+
     image = None
     if payload.image_b64:
         try:

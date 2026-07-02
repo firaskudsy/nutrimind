@@ -44,6 +44,8 @@ export const api = {
   putSettings: (values) => req("PUT", "/settings", { values }),
   getProfile: () => req("GET", "/profile"),
   putProfile: (values) => req("PUT", "/profile", values),
+  getPrompts: () => req("GET", "/prompts"),
+  putPrompts: (values) => req("PUT", "/prompts", { values }),
   chat: (message, image) =>
     req("POST", "/chat", {
       message,

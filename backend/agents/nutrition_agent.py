@@ -67,7 +67,7 @@ def _when_text() -> str:
     )
 
 
-def _system_content(profile: models.UserProfile | None, model: str) -> Any:
+async def _system_content(profile: models.UserProfile | None, model: str) -> Any:
     """Build the system message.
 
     For Anthropic models, return two blocks so the stable core+profile is
@@ -75,7 +75,7 @@ def _system_content(profile: models.UserProfile | None, model: str) -> Any:
     every minute — sits in a separate uncached block. Other providers get a
     plain concatenated string.
     """
-    core = build_system_prompt(profile)
+    core = await build_system_prompt(profile)
     when = _when_text()
     if model.startswith("anthropic/"):
         return [
@@ -198,7 +198,7 @@ async def run_turn(
     api_key = await settings_store.provider_api_key(model)
 
     messages: list[dict] = [
-        {"role": "system", "content": _system_content(profile, model)}
+        {"role": "system", "content": await _system_content(profile, model)}
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": _user_content(user_text, image)})

@@ -23,9 +23,9 @@ from telegram.ext import (
     filters,
 )
 
-from agents import memory, proactive, trends, usage
+from agents import macros, memory, proactive, trends, usage
 from agents.nutrition_agent import ImageInput, run_turn
-from app import authz
+from app import authz, settings_store
 from app.config import get_settings
 from app.scheduler import setup_scheduler
 
@@ -71,6 +71,7 @@ HELP_TEXT = (
     "Commands:\n"
     "/plan — your personalized calorie & protein plan\n"
     "/analyze — rate today's eating 1-10 vs. your plan, with fixes\n"
+    "/macros — today's net carbs, fiber & protein by food item\n"
     "/trends — charts of your weight, calories & sleep (week / month)\n"
     "/review — weekly review (diet + weight + Fitbit)\n"
     "/usage — token usage & cost (today / 7d / 30d)\n"
@@ -100,26 +101,13 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-def _fmt_period(label: str, d: dict) -> str:
-    return (
-        f"{label}: {d['calls']} calls · {d['total']:,} tokens "
-        f"(in {d['prompt']:,} / out {d['completion']:,}) · ${d['cost']:.4f}"
-    )
-
-
 async def usage_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Token usage + cost for today, last 7 days, last 30 days."""
     if not _allowed(update) or update.message is None:
         return
     data = await usage.usage_summary(ctx.bot_data["admin_id"])
-    text = (
-        "📊 Usage & cost\n\n"
-        f"{_fmt_period('Today', data['today'])}\n"
-        f"{_fmt_period('Last 7 days', data['week'])}\n"
-        f"{_fmt_period('Last 30 days', data['month'])}\n\n"
-        f"Model: {get_settings().agent_model}"
-    )
-    await update.message.reply_text(text)
+    model = await settings_store.agent_model(get_settings().agent_model)
+    await update.message.reply_text(usage.format_summary(data, model))
 
 
 async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -128,8 +116,9 @@ async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text("Pulling your data for a review — one moment...")
     try:
+        instruction = await proactive.weekly_review_instruction()
         msg = await proactive.proactive_message(
-            proactive.WEEKLY_REVIEW, ctx.bot_data["admin_id"], source="review"
+            instruction, ctx.bot_data["admin_id"], source="review"
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("weekly review failed")
@@ -162,6 +151,19 @@ async def analyze_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("day analysis failed")
         await update.message.reply_text(f"Sorry — couldn't analyze today: {exc}")
+        return
+    await update.message.reply_text(msg)
+
+
+async def macros_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Today's net carbs, fiber, and protein, broken down by food item."""
+    if not _allowed(update) or update.message is None:
+        return
+    try:
+        msg = await macros.todays_macros()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("macros failed")
+        await update.message.reply_text(f"Sorry — couldn't build your macros: {exc}")
         return
     await update.message.reply_text(msg)
 
@@ -259,6 +261,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("review", review))
     app.add_handler(CommandHandler("plan", plan_cmd))
     app.add_handler(CommandHandler("analyze", analyze_cmd))
+    app.add_handler(CommandHandler("macros", macros_cmd))
     app.add_handler(CommandHandler("trends", trends_cmd))
     app.add_handler(CommandHandler("usage", usage_cmd))
     app.add_handler(
