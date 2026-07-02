@@ -25,25 +25,25 @@ async def _send(app: Application, text: str) -> None:
             logger.exception("Failed to push proactive message to %s", uid)
 
 
-async def run_weight_prompt(app: Application) -> None:
-    msg = await proactive.proactive_message(proactive.WEIGHT_PROMPT)
+async def run_weight_prompt(app: Application, user_id: int) -> None:
+    msg = await proactive.proactive_message(proactive.WEIGHT_PROMPT, user_id)
     if msg:
         await _send(app, msg)
 
 
-async def run_meal_check(app: Application, meal: str) -> None:
-    msg = await proactive.proactive_message(proactive.meal_check(meal))
+async def run_meal_check(app: Application, meal: str, user_id: int) -> None:
+    msg = await proactive.proactive_message(proactive.meal_check(meal), user_id)
     if msg:
         await _send(app, msg)
 
 
-async def run_weekly_review(app: Application) -> None:
-    msg = await proactive.proactive_message(proactive.WEEKLY_REVIEW, source="review")
+async def run_weekly_review(app: Application, user_id: int) -> None:
+    msg = await proactive.proactive_message(proactive.WEEKLY_REVIEW, user_id, source="review")
     if msg:
         await _send(app, f"📊 Your weekly review\n\n{msg}")
 
 
-def setup_scheduler(app: Application) -> AsyncIOScheduler:
+def setup_scheduler(app: Application, user_id: int) -> AsyncIOScheduler:
     """Create, populate, and start the proactive scheduler (local timezone)."""
     settings = get_settings()
     sched = AsyncIOScheduler()
@@ -58,25 +58,25 @@ def setup_scheduler(app: Application) -> AsyncIOScheduler:
     sched.add_job(
         run_weight_prompt,
         CronTrigger(hour=settings.weight_prompt_hour, minute=0),
-        args=[app],
+        args=[app, user_id],
         id="weight_prompt",
     )
     sched.add_job(
         run_meal_check,
         CronTrigger(hour=settings.lunch_check_hour, minute=0),
-        args=[app, "lunch"],
+        args=[app, "lunch", user_id],
         id="lunch_check",
     )
     sched.add_job(
         run_meal_check,
         CronTrigger(hour=settings.dinner_check_hour, minute=30),
-        args=[app, "dinner"],
+        args=[app, "dinner", user_id],
         id="dinner_check",
     )
     sched.add_job(
         run_weekly_review,
         CronTrigger(day_of_week="sun", hour=settings.weekly_review_hour, minute=0),
-        args=[app],
+        args=[app, user_id],
         id="weekly_review",
     )
     sched.start()

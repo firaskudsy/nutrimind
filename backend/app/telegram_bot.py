@@ -23,6 +23,7 @@ from telegram.ext import (
 
 from agents import memory, proactive, usage
 from agents.nutrition_agent import ImageInput, run_turn
+from app import authz
 from app.config import get_settings
 from app.scheduler import setup_scheduler
 
@@ -101,11 +102,11 @@ def _fmt_period(label: str, d: dict) -> str:
     )
 
 
-async def usage_cmd(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+async def usage_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Token usage + cost for today, last 7 days, last 30 days."""
     if not _allowed(update) or update.message is None:
         return
-    data = await usage.usage_summary()
+    data = await usage.usage_summary(ctx.bot_data["admin_id"])
     text = (
         "📊 Usage & cost\n\n"
         f"{_fmt_period('Today', data['today'])}\n"
@@ -116,13 +117,15 @@ async def usage_cmd(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text)
 
 
-async def review(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """On-demand weekly review (also runs automatically on Sundays)."""
     if not _allowed(update) or update.message is None:
         return
     await update.message.reply_text("Pulling your data for a review — one moment...")
     try:
-        msg = await proactive.proactive_message(proactive.WEEKLY_REVIEW, source="review")
+        msg = await proactive.proactive_message(
+            proactive.WEEKLY_REVIEW, ctx.bot_data["admin_id"], source="review"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("weekly review failed")
         await update.message.reply_text(f"Sorry — review failed: {exc}")
@@ -154,26 +157,32 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         image = ImageInput(data=data, media_type="image/jpeg")
     text = update.message.caption or update.message.text or ""
 
-    hist = await memory.recent_history(limit=_MAX_TURNS * 2)
+    uid = ctx.bot_data["admin_id"]
+    hist = await memory.recent_history(uid, limit=_MAX_TURNS * 2)
     try:
-        reply = (await run_turn(text, image=image, history=hist)).strip()
+        reply = (await run_turn(text, user_id=uid, image=image, history=hist)).strip()
     except Exception as exc:  # noqa: BLE001 - surface failures to the user
         logger.exception("agent turn failed")
         await update.message.reply_text(f"Sorry — something went wrong: {exc}")
         return
 
-    await memory.save_message("user", text or "(photo)")
+    await memory.save_message(uid, "user", text or "(photo)")
     if reply:
-        await memory.save_message("assistant", reply)
+        await memory.save_message(uid, "assistant", reply)
     # Never send an empty message (Telegram rejects it).
     await update.message.reply_text(reply or "Hmm, I didn't get a reply — mind rephrasing?")
 
 
 async def _post_init(app: Application) -> None:
-    """Initialize the DB and start the proactive scheduler in the bot's loop."""
+    """Initialize the DB and start the proactive scheduler in the bot's loop.
+
+    The Telegram channel is the owner's, so it maps to the admin user.
+    """
     await memory.ensure_db()
+    admin_id = (await authz.ensure_admin_user()).id
+    app.bot_data["admin_id"] = admin_id
     if get_settings().proactive_enabled:
-        app.bot_data["scheduler"] = setup_scheduler(app)
+        app.bot_data["scheduler"] = setup_scheduler(app, admin_id)
 
 
 def build_application() -> Application:

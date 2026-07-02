@@ -26,6 +26,7 @@ async def _db(monkeypatch):
 async def test_profile_upsert_and_load(_db):
     memory = _db
     saved = await memory.apply_profile_update(
+        1,
         name="Alex",
         weight_unit="lbs",
         goals="lose 10 lbs, build muscle",
@@ -36,30 +37,35 @@ async def test_profile_upsert_and_load(_db):
     assert saved["targets"]["protein_g"] == 160
 
     # Partial update preserves prior fields.
-    await memory.apply_profile_update(preferences="vegetarian")
-    p = await memory.load_profile()
+    await memory.apply_profile_update(1, preferences="vegetarian")
+    p = await memory.load_profile(1)
     assert p.name == "Alex"
     assert p.allergies == "peanuts"
     assert p.preferences == "vegetarian"
     assert p.targets["protein_g"] == 160
 
+    # A different user has a separate, empty profile.
+    assert await memory.load_profile(2) is None
 
-async def test_chat_history_roundtrip(_db):
+
+async def test_chat_history_is_per_user(_db):
     memory = _db
-    await memory.save_message("user", "hi")
-    await memory.save_message("assistant", "hello!")
-    await memory.save_message("user", "log 2 eggs")
-    hist = await memory.recent_history(limit=10)
+    await memory.save_message(1, "user", "hi")
+    await memory.save_message(1, "assistant", "hello!")
+    await memory.save_message(2, "user", "not yours")
+    await memory.save_message(1, "user", "log 2 eggs")
+    hist = await memory.recent_history(1, limit=10)
     assert [m["role"] for m in hist] == ["user", "assistant", "user"]
     assert hist[0]["content"] == "hi"  # chronological order
     assert hist[-1]["content"] == "log 2 eggs"
+    assert all(m["content"] != "not yours" for m in hist)  # user 2 isolated
 
 
 def test_memory_tools_registered(_db):
     from agents import memory
 
     assert len(memory.MEMORY_TOOL_SPECS) == 2
-    assert set(memory.MEMORY_DISPATCH) == {"update_user_profile", "get_user_profile"}
+    assert set(memory.memory_dispatch(1)) == {"update_user_profile", "get_user_profile"}
     # OpenAI function-schema shape
     assert memory.MEMORY_TOOL_SPECS[0]["type"] == "function"
     assert "name" in memory.MEMORY_TOOL_SPECS[0]["function"]

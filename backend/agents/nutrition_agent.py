@@ -114,11 +114,11 @@ def _mcp_caller(session: Any, name: str) -> Callable:
 
 
 async def _gather_tools(
-    stack: contextlib.AsyncExitStack, settings
+    stack: contextlib.AsyncExitStack, settings, user_id: int
 ) -> tuple[list[dict], dict[str, Callable]]:
     """Assemble OpenAI tool specs + a name->callable dispatch from memory + MCP."""
     specs: list[dict] = list(memory.MEMORY_TOOL_SPECS)
-    dispatch: dict[str, Callable] = dict(memory.MEMORY_DISPATCH)
+    dispatch: dict[str, Callable] = memory.memory_dispatch(user_id)
     for ref in registry.server_refs(settings):
         # Retry once — smooths over transient blips (e.g. a container restart).
         for attempt in range(2):
@@ -182,15 +182,16 @@ async def _execute_tool_calls(
 async def run_turn(
     user_text: str,
     *,
+    user_id: int,
     image: ImageInput | None = None,
     history: list[dict] | None = None,
     profile: models.UserProfile | None = None,
     source: str = "chat",
 ) -> str:
-    """Run one assistant turn and return the final text response."""
+    """Run one assistant turn for a specific user and return the final text."""
     settings = get_settings()
     if profile is None:
-        profile = await memory.load_profile()
+        profile = await memory.load_profile(user_id)
 
     # Model + provider key are runtime-configurable from the web UI (DB over env).
     model = await settings_store.agent_model(settings.agent_model)
@@ -203,7 +204,7 @@ async def run_turn(
     messages.append({"role": "user", "content": _user_content(user_text, image)})
 
     async with contextlib.AsyncExitStack() as stack:
-        tools, dispatch = await _gather_tools(stack, settings)
+        tools, dispatch = await _gather_tools(stack, settings, user_id)
 
         for _ in range(MAX_TOOL_ITERATIONS):
             resp = await litellm.acompletion(
@@ -213,7 +214,7 @@ async def run_turn(
                 tools=tools or None,
                 max_tokens=MAX_TOKENS,
             )
-            await usage.record_from_response(resp, model, source)
+            await usage.record_from_response(resp, model, source, user_id)
             msg = resp.choices[0].message
             messages.append(_assistant_dict(msg))
 

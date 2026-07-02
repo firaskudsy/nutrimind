@@ -1,4 +1,4 @@
-"""Backend smoke test: DB models + CRUD routes over an in-process SQLite DB.
+"""Backend smoke test: app boots, /health and /api/config respond.
 
 MCP reachability is stubbed so the test never spawns external servers.
 """
@@ -16,7 +16,7 @@ async def client(monkeypatch):
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp.name}")
-    monkeypatch.setenv("API_BEARER_TOKEN", "")  # auth disabled for the test
+    monkeypatch.setenv("API_BEARER_TOKEN", "")
 
     from app.config import get_settings
 
@@ -54,27 +54,15 @@ async def test_health(client):
     assert "cronometer" in body["mcp"]
 
 
-async def test_meal_crud(client):
-    r = await client.post("/meals", json={"description": "2 eggs and toast"})
+async def test_public_config(client):
+    r = await client.get("/api/config")
     assert r.status_code == 200
-    meal = r.json()
-    assert meal["status"] == "proposed"
-    assert meal["description"] == "2 eggs and toast"
-
-    r = await client.get("/meals")
-    assert r.status_code == 200
-    assert any(m["id"] == meal["id"] for m in r.json())
+    body = r.json()
+    assert "google_enabled" in body
+    assert "password_login" in body
 
 
-async def test_weight_and_chat(client):
-    r = await client.post("/weights", json={"value": 199.0, "unit": "lbs"})
-    assert r.status_code == 200
-    assert r.json()["value"] == 199.0
-
-    r = await client.post("/chat", json={"content": "what should I eat?"})
-    assert r.status_code == 200
-    assert r.json()["role"] == "user"
-
-    r = await client.get("/chat")
-    assert r.status_code == 200
-    assert len(r.json()) >= 1
+async def test_protected_endpoints_require_auth(client):
+    # No token → 401 (fail-closed).
+    assert (await client.get("/api/dashboard")).status_code == 401
+    assert (await client.get("/api/settings")).status_code == 401

@@ -58,7 +58,7 @@ def _extract(resp: Any, model: str) -> tuple[int, int, int, float]:
     return pt, ct, tt, cost
 
 
-async def record_from_response(resp: Any, model: str, source: str) -> None:
+async def record_from_response(resp: Any, model: str, source: str, user_id: int) -> None:
     """Persist one call's usage. Never raises (usage tracking must not break a turn)."""
     try:
         pt, ct, tt, cost = _extract(resp, model)
@@ -66,6 +66,7 @@ async def record_from_response(resp: Any, model: str, source: str) -> None:
         async with get_sessionmaker()() as session:
             session.add(
                 models.UsageRecord(
+                    user_id=user_id,
                     model=model,
                     source=source,
                     prompt_tokens=pt,
@@ -79,7 +80,7 @@ async def record_from_response(resp: Any, model: str, source: str) -> None:
         logger.exception("failed to record usage")
 
 
-async def _totals_since(session, since: datetime) -> dict:
+async def _totals_since(session, since: datetime, user_id: int) -> dict:
     row = await session.execute(
         select(
             func.count(models.UsageRecord.id),
@@ -87,7 +88,10 @@ async def _totals_since(session, since: datetime) -> dict:
             func.coalesce(func.sum(models.UsageRecord.completion_tokens), 0),
             func.coalesce(func.sum(models.UsageRecord.total_tokens), 0),
             func.coalesce(func.sum(models.UsageRecord.cost_usd), 0.0),
-        ).where(models.UsageRecord.created_at >= since)
+        ).where(
+            models.UsageRecord.created_at >= since,
+            models.UsageRecord.user_id == user_id,
+        )
     )
     calls, pt, ct, tt, cost = row.one()
     return {
@@ -99,8 +103,8 @@ async def _totals_since(session, since: datetime) -> dict:
     }
 
 
-async def usage_summary() -> dict:
-    """Totals for today (since local midnight), last 7 days, and last 30 days."""
+async def usage_summary(user_id: int) -> dict:
+    """One user's totals for today (local midnight), last 7 days, last 30 days."""
     await ensure_db()
     now = datetime.now(timezone.utc)
     local_midnight = (
@@ -115,4 +119,7 @@ async def usage_summary() -> dict:
         "month": now - timedelta(days=30),
     }
     async with get_sessionmaker()() as session:
-        return {label: await _totals_since(session, since) for label, since in windows.items()}
+        return {
+            label: await _totals_since(session, since, user_id)
+            for label, since in windows.items()
+        }
