@@ -8,6 +8,8 @@ Run:  uv run python -m app.telegram_bot
 Needs TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS, ANTHROPIC_API_KEY in .env.
 """
 
+import contextlib
+import io
 import logging
 
 from dotenv import find_dotenv, load_dotenv
@@ -21,7 +23,7 @@ from telegram.ext import (
     filters,
 )
 
-from agents import memory, proactive, usage
+from agents import memory, proactive, trends, usage
 from agents.nutrition_agent import ImageInput, run_turn
 from app import authz
 from app.config import get_settings
@@ -67,6 +69,7 @@ HELP_TEXT = (
     "• Ask about today's calories/nutrition, your weight trend, or your Fitbit sleep/steps\n"
     "• Tell me your goals, allergies, and preferences — I'll remember them\n\n"
     "Commands:\n"
+    "/trends — charts of your weight, calories & sleep (week / month)\n"
     "/review — weekly review (diet + weight + Fitbit)\n"
     "/usage — token usage & cost (today / 7d / 30d)\n"
     "/whoami — your Telegram user ID\n"
@@ -131,6 +134,31 @@ async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Sorry — review failed: {exc}")
         return
     await update.message.reply_text(msg or "Not enough data yet for a review.")
+
+
+async def trends_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Render weight/calorie/sleep trend charts (week / month / 3 months) as an image."""
+    if not _allowed(update) or update.message is None:
+        return
+    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.UPLOAD_PHOTO)
+    note = await update.message.reply_text(
+        "📈 Crunching your weight, calorie & sleep trends — one moment..."
+    )
+    try:
+        png = await trends.generate_trends_png(ctx.bot_data["admin_id"])
+    except Exception as exc:  # noqa: BLE001 - surface failures to the user
+        logger.exception("trends failed")
+        await update.message.reply_text(f"Sorry — couldn't build your trends: {exc}")
+        return
+    finally:
+        with contextlib.suppress(Exception):
+            await note.delete()
+    photo = io.BytesIO(png)
+    photo.name = "trends.png"
+    await update.message.reply_photo(
+        photo=photo,
+        caption="Your weight, calories & sleep — last week / month.",
+    )
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -199,6 +227,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("whoami", whoami))
     app.add_handler(CommandHandler("review", review))
+    app.add_handler(CommandHandler("trends", trends_cmd))
     app.add_handler(CommandHandler("usage", usage_cmd))
     app.add_handler(
         MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, on_message)
