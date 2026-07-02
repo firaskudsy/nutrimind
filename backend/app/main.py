@@ -5,10 +5,12 @@ health endpoint, and single-user bearer auth. The agent + Telegram layers plug
 in on top of this in the next phase.
 """
 
+import asyncio
 import base64
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 
 from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -278,12 +280,24 @@ def _latest_weight(weights: dict | None) -> float | None:
     return max(rows, key=lambda r: r["day"])["value"] if rows else None
 
 
+def _day_series(points: dict[date, float], digits: int = 1) -> list[dict]:
+    return [{"day": d.isoformat(), "value": round(v, digits)} for d, v in sorted(points.items())]
+
+
 @app.get("/api/dashboard")
 async def dashboard(user=Depends(authz.require_approved)) -> dict:
-    """Aggregate data for the dashboard: cost, profile, nutrition, weight trend."""
+    """Aggregate data for the dashboard: cost, profile, nutrition, weight/health trends."""
     profile = memory.profile_summary(await memory.load_profile(user.id))
     unit = profile.get("weight_unit") or "lbs"
     weights = await _cronometer_tool("get_weight_history", {"unit": unit})
+
+    today = date.today()
+    start = today - timedelta(days=30)
+    sleep, heart_rate, spo2 = await asyncio.gather(
+        trends._fetch_sleep(start, today),
+        trends._fetch_resting_heart_rate(start, today),
+        trends._fetch_spo2(start, today),
+    )
 
     macro_targets = None
     latest_weight = _latest_weight(weights)
@@ -300,6 +314,9 @@ async def dashboard(user=Depends(authz.require_approved)) -> dict:
         "nutrition_today": await _cronometer_tool("get_daily_nutrition", {}),
         "weights": weights,
         "macro_targets": macro_targets,
+        "sleep": _day_series(sleep),
+        "heart_rate": _day_series(heart_rate, digits=0),
+        "spo2": _day_series(spo2),
     }
 
 

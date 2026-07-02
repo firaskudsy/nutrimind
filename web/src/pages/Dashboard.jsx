@@ -30,6 +30,9 @@ function useChartColors() {
     axis: dark ? "#8A9A92" : "#6B7A72",
     surface: dark ? "#141C19" : "#FFFDF7",
     ink: dark ? "#EDEBE3" : "#14201B",
+    sleep: dark ? "#A78BFA" : "#7C5CBF",
+    heart: dark ? "#F87171" : "#C0392B",
+    spo2: dark ? "#38BDF8" : "#0E7AA6",
   };
 }
 
@@ -103,6 +106,18 @@ export default function Dashboard() {
     return [...rows].sort((a, b) => (a.day > b.day ? 1 : -1)).map((r) => ({ day: shortDay(r.day), value: r.value }));
   }, [data]);
   const latestWeight = weightSeries.at(-1)?.value;
+  const sleepSeries = useMemo(
+    () => (data?.sleep || []).map((r) => ({ day: shortDay(r.day), value: r.value })),
+    [data],
+  );
+  const heartRateSeries = useMemo(
+    () => (data?.heart_rate || []).map((r) => ({ day: shortDay(r.day), value: r.value })),
+    [data],
+  );
+  const spo2Series = useMemo(
+    () => (data?.spo2 || []).map((r) => ({ day: shortDay(r.day), value: r.value })),
+    [data],
+  );
   const costSeries = data
     ? [
         { name: "Today", cost: +(data.usage.today.cost || 0).toFixed(3) },
@@ -207,8 +222,58 @@ export default function Dashboard() {
         </ChartCard>
       </div>
 
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <ChartCard i={8} title="Sleep trend" subtitle="Hours asleep · last 30 days">
+          {sleepSeries.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={sleepSeries} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
+                <Tooltip content={<ChartTip unit="hrs" c={c} />} cursor={{ fill: `${c.sleep}12` }} />
+                <Bar dataKey="value" fill={c.sleep} radius={[4, 4, 0, 0]} maxBarSize={16} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty height={200}>No sleep data from Google Health yet.</Empty>
+          )}
+        </ChartCard>
+
+        <ChartCard i={9} title="Heart rate trend" subtitle="Resting BPM · last 30 days">
+          {heartRateSeries.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={heartRateSeries} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                <Tooltip content={<ChartTip unit="bpm" c={c} />} />
+                <Line type="monotone" dataKey="value" stroke={c.heart} strokeWidth={2} dot={{ r: 2, fill: c.heart }} activeDot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty height={200}>No heart rate data from Google Health yet.</Empty>
+          )}
+        </ChartCard>
+
+        <ChartCard i={10} title="SpO2 trend" subtitle="Blood oxygen % · last 30 days">
+          {spo2Series.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={spo2Series} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                <Tooltip content={<ChartTip unit="%" c={c} />} />
+                <Line type="monotone" dataKey="value" stroke={c.spo2} strokeWidth={2} dot={{ r: 2, fill: c.spo2 }} activeDot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty height={200}>No SpO2 data from Google Health yet.</Empty>
+          )}
+        </ChartCard>
+      </div>
+
       <div className="mt-4">
-        <ChartCard i={7} title="Assistant cost" subtitle="LLM spend across periods">
+        <ChartCard i={11} title="Assistant cost" subtitle="LLM spend across periods">
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={costSeries} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
@@ -224,6 +289,10 @@ export default function Dashboard() {
   );
 }
 
-function Empty({ children }) {
-  return <div className="grid h-[240px] place-items-center text-center text-sm text-muted">{children}</div>;
+function Empty({ height = 240, children }) {
+  return (
+    <div className="grid place-items-center text-center text-sm text-muted" style={{ height }}>
+      {children}
+    </div>
+  );
 }

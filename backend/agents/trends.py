@@ -184,7 +184,69 @@ async def _fetch_sleep(start: date, end: date) -> dict[date, float]:
                 break
     except Exception as exc:  # noqa: BLE001
         logger.warning("trends: sleep fetch failed: %s", exc)
-    return dict(hours)
+    # The API doesn't strictly honor start_time/end_time, so clip client-side --
+    # generate_trends_png re-clips via _window() too, but /api/dashboard uses
+    # this fetcher's result directly and needs it bounded on its own.
+    return {d: h for d, h in hours.items() if start <= d <= end}
+
+
+def _daily_point(dp: dict, container_key: str, value_key: str) -> tuple[date | None, float | None]:
+    """Extract (date, value) from a Google Health 'Daily'-kind dataPoint."""
+    container = dp.get(container_key) or {}
+    d = container.get("date") or {}
+    value = container.get(value_key)
+    if not d or value is None:
+        return None, None
+    try:
+        return date(d["year"], d["month"], d["day"]), float(value)
+    except (KeyError, TypeError, ValueError):
+        return None, None
+
+
+async def _fetch_daily_metric(
+    data_type: str, container_key: str, value_key: str, start: date, end: date
+) -> dict[date, float]:
+    """Single-page fetch for a Google Health 'Daily'-kind data type (~30 points max)."""
+    ref = _ref("google_health")
+    if ref is None:
+        return {}
+    try:
+        raw = _unwrap(
+            await registry.call_tool(
+                ref,
+                "google_health_list_data_points",
+                {
+                    "data_type": data_type,
+                    "start_time": f"{start.isoformat()}T00:00:00Z",
+                    "end_time": f"{(end + timedelta(days=1)).isoformat()}T00:00:00Z",
+                    "page_size": 100,
+                },
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - a source outage must not break the dashboard
+        logger.warning("trends: %s fetch failed: %s", data_type, exc)
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[date, float] = {}
+    for dp in (raw.get("data") or {}).get("dataPoints") or []:
+        day, value = _daily_point(dp, container_key, value_key)
+        # The API doesn't strictly honor start_time/end_time, so clip client-side.
+        if day is not None and value is not None and start <= day <= end:
+            out[day] = value
+    return out
+
+
+async def _fetch_resting_heart_rate(start: date, end: date) -> dict[date, float]:
+    return await _fetch_daily_metric(
+        "daily-resting-heart-rate", "dailyRestingHeartRate", "beatsPerMinute", start, end
+    )
+
+
+async def _fetch_spo2(start: date, end: date) -> dict[date, float]:
+    return await _fetch_daily_metric(
+        "daily-oxygen-saturation", "dailyOxygenSaturation", "averagePercentage", start, end
+    )
 
 
 async def _fetch_calories(today: date) -> dict[date, float]:
