@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ImagePlus, SendHorizontal, Sparkles, X } from "lucide-react";
+import { Clock, ImagePlus, SendHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 
@@ -31,14 +31,14 @@ function readImage(file) {
   });
 }
 
-function Bubble({ role, content, image }) {
+function Bubble({ role, content, image, elapsed }) {
   const user = role === "user";
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className={`flex ${user ? "justify-end" : "justify-start"}`}
+      className={`flex flex-col ${user ? "items-end" : "items-start"}`}
     >
       <div
         className={`max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -50,6 +50,11 @@ function Bubble({ role, content, image }) {
         {image && <img src={image} alt="" className="mb-2 rounded-xl" />}
         {content}
       </div>
+      {elapsed != null && (
+        <span className="mt-1 flex items-center gap-1 px-1 text-[10px] text-muted">
+          <Clock size={10} /> {elapsed.toFixed(1)}s
+        </span>
+      )}
     </motion.div>
   );
 }
@@ -79,9 +84,12 @@ export default function Chat() {
     const img = image;
     setImage(null);
     try {
-      const { reply, image_b64 } = await api.chat(msg, img);
+      const { reply, image_b64, elapsed_seconds } = await api.chat(msg, img);
       const replyImage = image_b64 ? `data:image/png;base64,${image_b64}` : null;
-      setMessages((m) => [...m, { role: "assistant", content: reply, image: replyImage }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: reply, image: replyImage, elapsed: elapsed_seconds },
+      ]);
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", content: `⚠ ${e.message}` }]);
     } finally {
@@ -116,7 +124,7 @@ export default function Chat() {
           </div>
         )}
         {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} content={m.content} image={m.image} />
+          <Bubble key={i} role={m.role} content={m.content} image={m.image} elapsed={m.elapsed} />
         ))}
         {busy && (
           <div className="flex justify-start">

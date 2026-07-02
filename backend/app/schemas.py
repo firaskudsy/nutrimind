@@ -117,6 +117,7 @@ class WebChatIn(BaseModel):
 class WebChatOut(BaseModel):
     reply: str
     image_b64: str | None = None
+    elapsed_seconds: float | None = None
 
 
 class SettingsUpdate(BaseModel):

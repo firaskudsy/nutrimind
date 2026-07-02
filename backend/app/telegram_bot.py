@@ -11,6 +11,7 @@ Needs TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS, ANTHROPIC_API_KEY in .env.
 import contextlib
 import io
 import logging
+import time
 
 from dotenv import find_dotenv, load_dotenv
 from telegram import Update
@@ -33,6 +34,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _MAX_TURNS = 20  # messages loaded as context per turn = _MAX_TURNS * 2
+
+
+def _elapsed_suffix(start: float) -> str:
+    return f"\n\n⏱ {time.monotonic() - start:.1f}s"
 
 
 def _allowed(update: Update) -> bool:
@@ -105,9 +110,11 @@ async def usage_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Token usage + cost for today, last 7 days, last 30 days."""
     if not _allowed(update) or update.message is None:
         return
+    start = time.monotonic()
     data = await usage.usage_summary(ctx.bot_data["admin_id"])
     model = await settings_store.agent_model(get_settings().agent_model)
-    await update.message.reply_text(usage.format_summary(data, model))
+    text = usage.format_summary(data, model) + _elapsed_suffix(start)
+    await update.message.reply_text(text)
 
 
 async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -115,6 +122,7 @@ async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update) or update.message is None:
         return
     await update.message.reply_text("Pulling your data for a review — one moment...")
+    start = time.monotonic()
     try:
         instruction = await proactive.weekly_review_instruction()
         msg = await proactive.proactive_message(
@@ -124,7 +132,8 @@ async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("weekly review failed")
         await update.message.reply_text(f"Sorry — review failed: {exc}")
         return
-    await update.message.reply_text(msg or "Not enough data yet for a review.")
+    text = (msg or "Not enough data yet for a review.") + _elapsed_suffix(start)
+    await update.message.reply_text(text)
 
 
 async def plan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -132,13 +141,14 @@ async def plan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update) or update.message is None:
         return
     await update.message.reply_text("Building your plan — one moment...")
+    start = time.monotonic()
     try:
         msg = await proactive.diet_plan(ctx.bot_data["admin_id"])
     except Exception as exc:  # noqa: BLE001
         logger.exception("diet plan failed")
         await update.message.reply_text(f"Sorry — couldn't build your plan: {exc}")
         return
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg + _elapsed_suffix(start))
 
 
 async def analyze_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -146,26 +156,28 @@ async def analyze_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update) or update.message is None:
         return
     await update.message.reply_text("Analyzing today's meals — one moment...")
+    start = time.monotonic()
     try:
         msg = await proactive.analyze_day(ctx.bot_data["admin_id"])
     except Exception as exc:  # noqa: BLE001
         logger.exception("day analysis failed")
         await update.message.reply_text(f"Sorry — couldn't analyze today: {exc}")
         return
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg + _elapsed_suffix(start))
 
 
 async def macros_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Today's net carbs, fiber, and protein, broken down by food item."""
     if not _allowed(update) or update.message is None:
         return
+    start = time.monotonic()
     try:
         msg = await macros.todays_macros()
     except Exception as exc:  # noqa: BLE001
         logger.exception("macros failed")
         await update.message.reply_text(f"Sorry — couldn't build your macros: {exc}")
         return
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg + _elapsed_suffix(start))
 
 
 async def trends_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -176,6 +188,7 @@ async def trends_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     note = await update.message.reply_text(
         "📈 Crunching your weight, calorie & sleep trends — one moment..."
     )
+    start = time.monotonic()
     try:
         png = await trends.generate_trends_png(ctx.bot_data["admin_id"])
     except Exception as exc:  # noqa: BLE001 - surface failures to the user
@@ -187,10 +200,8 @@ async def trends_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             await note.delete()
     photo = io.BytesIO(png)
     photo.name = "trends.png"
-    await update.message.reply_photo(
-        photo=photo,
-        caption="Your weight, calories & sleep — last week / month.",
-    )
+    caption = "Your weight, calories & sleep — last week / month." + _elapsed_suffix(start)
+    await update.message.reply_photo(photo=photo, caption=caption)
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -219,18 +230,21 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     uid = ctx.bot_data["admin_id"]
     hist = await memory.recent_history(uid, limit=_MAX_TURNS * 2)
+    start = time.monotonic()
     try:
         reply = (await run_turn(text, user_id=uid, image=image, history=hist)).strip()
     except Exception as exc:  # noqa: BLE001 - surface failures to the user
         logger.exception("agent turn failed")
         await update.message.reply_text(f"Sorry — something went wrong: {exc}")
         return
+    # The displayed text gets the timing suffix; the saved history stays clean
+    # so it isn't re-fed to the model as conversation context on later turns.
+    display = (reply or "Hmm, I didn't get a reply — mind rephrasing?") + _elapsed_suffix(start)
 
     await memory.save_message(uid, "user", text or "(photo)")
     if reply:
         await memory.save_message(uid, "assistant", reply)
-    # Never send an empty message (Telegram rejects it).
-    await update.message.reply_text(reply or "Hmm, I didn't get a reply — mind rephrasing?")
+    await update.message.reply_text(display)
 
 
 async def _post_init(app: Application) -> None:

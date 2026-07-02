@@ -8,6 +8,7 @@ in on top of this in the next phase.
 import base64
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from dotenv import find_dotenv, load_dotenv
@@ -220,16 +221,18 @@ async def web_chat(payload: WebChatIn, user=Depends(authz.require_approved)) -> 
     """One agent turn from the web UI (scoped to the signed-in user)."""
     cmd = payload.message.strip().split()[0].lower() if payload.message.strip() else ""
     if cmd in _COMMANDS and not payload.image_b64:
+        start = time.monotonic()
         try:
             reply, png = await _run_command(cmd, user.id)
         except Exception as exc:  # noqa: BLE001 - surface failures to the user
             logger.exception("web command %s failed", cmd)
             reply, png = f"Sorry — {cmd} failed: {exc}", None
+        elapsed = time.monotonic() - start
         await memory.save_message(user.id, "user", payload.message)
         if reply:
             await memory.save_message(user.id, "assistant", reply)
         image_b64 = base64.standard_b64encode(png).decode("utf-8") if png else None
-        return WebChatOut(reply=reply or "(no reply)", image_b64=image_b64)
+        return WebChatOut(reply=reply or "(no reply)", image_b64=image_b64, elapsed_seconds=elapsed)
 
     image = None
     if payload.image_b64:
@@ -242,13 +245,15 @@ async def web_chat(payload: WebChatIn, user=Depends(authz.require_approved)) -> 
             raise HTTPException(status_code=400, detail=f"Bad image: {exc}") from exc
 
     history = await memory.recent_history(user.id, limit=40)
+    start = time.monotonic()
     reply = (
         await run_turn(payload.message, user_id=user.id, image=image, history=history, source="web")
     ).strip()
+    elapsed = time.monotonic() - start
     await memory.save_message(user.id, "user", payload.message or "(photo)")
     if reply:
         await memory.save_message(user.id, "assistant", reply)
-    return WebChatOut(reply=reply or "(no reply)")
+    return WebChatOut(reply=reply or "(no reply)", elapsed_seconds=elapsed)
 
 
 @app.get("/api/chat/history")
