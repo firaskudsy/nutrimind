@@ -70,6 +70,7 @@ HELP_TEXT = (
     "• Tell me your goals, allergies, and preferences — I'll remember them\n\n"
     "Commands:\n"
     "/plan — your personalized calorie & protein plan\n"
+    "/analyze — rate today's eating 1-10 vs. your plan, with fixes\n"
     "/trends — charts of your weight, calories & sleep (week / month)\n"
     "/review — weekly review (diet + weight + Fitbit)\n"
     "/usage — token usage & cost (today / 7d / 30d)\n"
@@ -147,6 +148,20 @@ async def plan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("diet plan failed")
         await update.message.reply_text(f"Sorry — couldn't build your plan: {exc}")
+        return
+    await update.message.reply_text(msg)
+
+
+async def analyze_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """On-demand rating of today's logged meals against goals/conditions/calories."""
+    if not _allowed(update) or update.message is None:
+        return
+    await update.message.reply_text("Analyzing today's meals — one moment...")
+    try:
+        msg = await proactive.analyze_day(ctx.bot_data["admin_id"])
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("day analysis failed")
+        await update.message.reply_text(f"Sorry — couldn't analyze today: {exc}")
         return
     await update.message.reply_text(msg)
 
@@ -243,6 +258,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("whoami", whoami))
     app.add_handler(CommandHandler("review", review))
     app.add_handler(CommandHandler("plan", plan_cmd))
+    app.add_handler(CommandHandler("analyze", analyze_cmd))
     app.add_handler(CommandHandler("trends", trends_cmd))
     app.add_handler(CommandHandler("usage", usage_cmd))
     app.add_handler(

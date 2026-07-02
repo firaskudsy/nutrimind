@@ -171,3 +171,66 @@ async def diet_plan(user_id: int) -> str:
     )
     reply = (await run_turn(instruction, user_id=user_id, source="plan")).strip()
     return reply or "Sorry -- couldn't build your plan this time. Try again in a moment."
+
+
+# ------------------------------------------------------------------
+# /analyze -- rate today's eating against conditions/goals/targets
+# ------------------------------------------------------------------
+
+
+async def analyze_day(user_id: int) -> str:
+    """Generate the /analyze command's rating of today's logged meals.
+
+    Reuses /plan's calorie/protein anchor as the target to rate against when the
+    user hasn't set an explicit one (same BMR + weight math, moderate-deficit
+    tier) -- otherwise this command would have nothing concrete to score against.
+    Everything else (which items hurt the score, alternatives, how meal timing
+    across the day factors in) is left to the model, which pulls today's actual
+    diary via get_food_log rather than trusting anything precomputed here.
+    """
+    profile = await memory.load_profile(user_id)
+    summary = memory.profile_summary(profile)
+
+    targets = summary.get("targets") or {}
+    calorie_target = targets.get("calories")
+    protein_target = targets.get("protein_g")
+
+    if calorie_target is None and all(summary.get(f) for f in ("age", "sex", "height_cm")):
+        unit = summary.get("weight_unit") or "lbs"
+        today = date.today()
+        weights = await _fetch_weight(unit, today - timedelta(days=30), today)
+        if weights:
+            weight_native = weights[max(weights)]
+            weight_kg = weight_native * 0.45359237 if unit == "lbs" else weight_native
+            bmr = _bmr_kcal(weight_kg, summary["height_cm"], summary["age"], summary["sex"])
+            calorie_target = _calorie_tiers(bmr)["moderate_low"]
+            if protein_target is None:
+                protein_target = _protein_target_g(weight_kg)[0]
+
+    target_text = f"~{calorie_target} kcal" if calorie_target else "none on file"
+    if protein_target:
+        target_text += f", ~{protein_target}g protein"
+
+    instruction = (
+        "Analyze what the user has eaten TODAY. Call get_food_log once for today's "
+        "Cronometer diary (foods, amounts, meal groups, energy_summary, nutrition_summary) "
+        "-- use its real data, don't guess.\n\n"
+        f"Calorie/protein target: {target_text}\n"
+        f"Weight-loss goal: {summary.get('goals') or 'none recorded'}\n"
+        f"Health conditions: {summary.get('conditions') or 'none recorded'}\n"
+        f"Allergies/avoid: {summary.get('allergies') or 'none recorded'}\n\n"
+        "If nothing is logged yet today, say so plainly and stop -- don't invent a score. "
+        "Otherwise reply in plain text (no markdown):\n"
+        "1. A score out of 10 for today's eating so far, weighing the calorie/protein "
+        "target, the weight-loss goal, and the health conditions/allergies above -- also "
+        "weigh how meals are spaced across the day (long gaps, everything back-loaded "
+        "late at night, a skipped meal), not just the totals.\n"
+        "2. The specific items that hurt the score, each with a one-line reason (over "
+        "target, conflicts with a condition or allergy, poor timing, etc).\n"
+        "3. One concrete swap/alternative for each flagged item.\n"
+        "4. A one-line total: calories/protein consumed vs. target, and calories "
+        "remaining.\n"
+        "End with the standard wellness disclaimer: general guidance, not medical advice."
+    )
+    reply = (await run_turn(instruction, user_id=user_id, source="analyze")).strip()
+    return reply or "Sorry -- couldn't analyze today's meals right now. Try again in a moment."
