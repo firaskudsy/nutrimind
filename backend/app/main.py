@@ -13,31 +13,22 @@ from contextlib import asynccontextmanager
 from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents import memory, usage
 from agents.nutrition_agent import ImageInput, run_turn
 from app import authz, settings_store
-from app.auth import require_token
 from app.config import get_settings
 from app.schemas import (
-    ChatMessageIn,
-    ChatMessageOut,
     GoogleLoginIn,
     HealthOut,
     LoginIn,
     LoginOut,
-    MealCreate,
-    MealOut,
-    MetricOut,
     SettingsUpdate,
     WebChatIn,
     WebChatOut,
-    WeightCreate,
-    WeightOut,
 )
-from db import models
 from db.base import create_all, get_session, init_engine
 from mcp_clients import registry
 
@@ -78,90 +69,6 @@ async def health(session: AsyncSession = Depends(get_session)) -> HealthOut:
     mcp_status = await registry.health_check()
     overall = "ok" if db_ok else "degraded"
     return HealthOut(status=overall, db=db_ok, mcp=mcp_status)
-
-
-# ---- Meals ----
-@app.post("/meals", response_model=MealOut, dependencies=[Depends(require_token)])
-async def create_meal(
-    payload: MealCreate, session: AsyncSession = Depends(get_session)
-) -> MealOut:
-    meal = models.Meal(**payload.model_dump(exclude_none=True))
-    session.add(meal)
-    await session.commit()
-    await session.refresh(meal)
-    return MealOut.model_validate(meal)
-
-
-@app.get("/meals", response_model=list[MealOut], dependencies=[Depends(require_token)])
-async def list_meals(
-    limit: int = 50, session: AsyncSession = Depends(get_session)
-) -> list[MealOut]:
-    rows = await session.execute(
-        select(models.Meal).order_by(models.Meal.created_at.desc()).limit(limit)
-    )
-    return [MealOut.model_validate(m) for m in rows.scalars()]
-
-
-# ---- Weights ----
-@app.post("/weights", response_model=WeightOut, dependencies=[Depends(require_token)])
-async def create_weight(
-    payload: WeightCreate, session: AsyncSession = Depends(get_session)
-) -> WeightOut:
-    from datetime import date as _date
-
-    data = payload.model_dump(exclude_none=True)
-    data.setdefault("day", _date.today())
-    weight = models.Weight(**data)
-    session.add(weight)
-    await session.commit()
-    await session.refresh(weight)
-    return WeightOut.model_validate(weight)
-
-
-@app.get("/weights", response_model=list[WeightOut], dependencies=[Depends(require_token)])
-async def list_weights(
-    limit: int = 90, session: AsyncSession = Depends(get_session)
-) -> list[WeightOut]:
-    rows = await session.execute(
-        select(models.Weight).order_by(models.Weight.day.desc()).limit(limit)
-    )
-    return [WeightOut.model_validate(w) for w in rows.scalars()]
-
-
-# ---- Metrics ----
-@app.get("/metrics", response_model=list[MetricOut], dependencies=[Depends(require_token)])
-async def list_metrics(
-    limit: int = 200, session: AsyncSession = Depends(get_session)
-) -> list[MetricOut]:
-    rows = await session.execute(
-        select(models.Metric).order_by(models.Metric.day.desc()).limit(limit)
-    )
-    return [MetricOut.model_validate(m) for m in rows.scalars()]
-
-
-# ---- Chat history ----
-@app.post("/chat", response_model=ChatMessageOut, dependencies=[Depends(require_token)])
-async def post_chat(
-    payload: ChatMessageIn, session: AsyncSession = Depends(get_session)
-) -> ChatMessageOut:
-    """Persist a user message. (Agent response wiring lands in the next phase.)"""
-    msg = models.ChatMessage(role="user", content=payload.content)
-    session.add(msg)
-    await session.commit()
-    await session.refresh(msg)
-    return ChatMessageOut.model_validate(msg)
-
-
-@app.get("/chat", response_model=list[ChatMessageOut], dependencies=[Depends(require_token)])
-async def list_chat(
-    limit: int = 50, session: AsyncSession = Depends(get_session)
-) -> list[ChatMessageOut]:
-    rows = await session.execute(
-        select(models.ChatMessage)
-        .order_by(models.ChatMessage.created_at.desc())
-        .limit(limit)
-    )
-    return [ChatMessageOut.model_validate(m) for m in rows.scalars()]
 
 
 # ==================================================================
@@ -234,9 +141,9 @@ async def put_settings(payload: SettingsUpdate) -> dict:
     return {"settings": await settings_store.public_view()}
 
 
-@app.post("/api/chat", response_model=WebChatOut, dependencies=[Depends(authz.require_approved)])
-async def web_chat(payload: WebChatIn) -> WebChatOut:
-    """One agent turn from the web UI (persists to shared chat history)."""
+@app.post("/api/chat", response_model=WebChatOut)
+async def web_chat(payload: WebChatIn, user=Depends(authz.require_approved)) -> WebChatOut:
+    """One agent turn from the web UI (scoped to the signed-in user)."""
     image = None
     if payload.image_b64:
         try:
@@ -247,17 +154,19 @@ async def web_chat(payload: WebChatIn) -> WebChatOut:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"Bad image: {exc}") from exc
 
-    history = await memory.recent_history(limit=40)
-    reply = (await run_turn(payload.message, image=image, history=history, source="web")).strip()
-    await memory.save_message("user", payload.message or "(photo)")
+    history = await memory.recent_history(user.id, limit=40)
+    reply = (
+        await run_turn(payload.message, user_id=user.id, image=image, history=history, source="web")
+    ).strip()
+    await memory.save_message(user.id, "user", payload.message or "(photo)")
     if reply:
-        await memory.save_message("assistant", reply)
+        await memory.save_message(user.id, "assistant", reply)
     return WebChatOut(reply=reply or "(no reply)")
 
 
-@app.get("/api/chat/history", dependencies=[Depends(authz.require_approved)])
-async def web_chat_history() -> dict:
-    return {"messages": await memory.recent_history(limit=100)}
+@app.get("/api/chat/history")
+async def web_chat_history(user=Depends(authz.require_approved)) -> dict:
+    return {"messages": await memory.recent_history(user.id, limit=100)}
 
 
 async def _cronometer_tool(tool: str, args: dict) -> dict | None:
@@ -274,12 +183,12 @@ async def _cronometer_tool(tool: str, args: dict) -> dict | None:
         return None
 
 
-@app.get("/api/dashboard", dependencies=[Depends(authz.require_approved)])
-async def dashboard() -> dict:
+@app.get("/api/dashboard")
+async def dashboard(user=Depends(authz.require_approved)) -> dict:
     """Aggregate data for the dashboard: cost, profile, nutrition, weight trend."""
-    profile = memory.profile_summary(await memory.load_profile())
+    profile = memory.profile_summary(await memory.load_profile(user.id))
     return {
-        "usage": await usage.usage_summary(),
+        "usage": await usage.usage_summary(user.id),
         "profile": profile,
         "nutrition_today": await _cronometer_tool("get_daily_nutrition", {}),
         "weights": await _cronometer_tool("get_weight_history", {"unit": profile.get("weight_unit") or "lbs"}),

@@ -17,19 +17,22 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
 from agents.nutrition_agent import ImageInput, run_turn
+from app import authz
 
 
 async def _one_shot(text: str, image_path: str | None) -> None:
+    uid = (await authz.ensure_admin_user()).id
     image = None
     if image_path:
         data = Path(image_path).read_bytes()
         media_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
         image = ImageInput(data=data, media_type=media_type)
-    reply = await run_turn(text, image=image)
+    reply = await run_turn(text, user_id=uid, image=image)
     print(f"\nNutriMind: {reply}\n")
 
 
 async def _repl() -> None:
+    uid = (await authz.ensure_admin_user()).id
     history: list[dict] = []
     print("NutriMind REPL — type a message (Ctrl-C to quit).")
     while True:
@@ -41,7 +44,7 @@ async def _repl() -> None:
         if not text:
             continue
         history.append({"role": "user", "content": text})
-        reply = await run_turn(text, history=history[:-1])
+        reply = await run_turn(text, user_id=uid, history=history[:-1])
         history.append({"role": "assistant", "content": reply})
         print(f"NutriMind> {reply}\n")
 

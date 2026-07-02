@@ -5,13 +5,14 @@ targets) and chat history with the app database. Exposes two local tools the
 agent can call to read/update the profile, plus helpers the bot uses for
 DB-backed conversation history.
 
-The profile is a single row (id=1). Free-text fields (goals/allergies/
+Everything is per-user (keyed by user_id). Free-text fields (goals/allergies/
 preferences) are stored as strings in the JSON columns; targets is a small dict.
 """
 
 from __future__ import annotations
 
 import logging
+from functools import partial
 
 from sqlalchemy import select
 
@@ -21,7 +22,6 @@ from db.base import create_all, get_sessionmaker, init_engine
 
 logger = logging.getLogger(__name__)
 
-_PROFILE_ID = 1
 _db_ready = False
 
 
@@ -35,10 +35,13 @@ async def ensure_db() -> None:
     _db_ready = True
 
 
-async def load_profile() -> models.UserProfile | None:
+async def load_profile(user_id: int) -> models.UserProfile | None:
     await ensure_db()
     async with get_sessionmaker()() as session:
-        return await session.get(models.UserProfile, _PROFILE_ID)
+        rows = await session.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        return rows.scalar_one_or_none()
 
 
 def profile_summary(p: models.UserProfile | None) -> dict:
@@ -59,12 +62,13 @@ def profile_summary(p: models.UserProfile | None) -> dict:
 # ------------------------------------------------------------------
 
 
-async def recent_history(limit: int = 40) -> list[dict]:
-    """Return the last `limit` chat messages as Anthropic role/content dicts."""
+async def recent_history(user_id: int, limit: int = 40) -> list[dict]:
+    """Return the user's last `limit` chat messages as role/content dicts."""
     await ensure_db()
     async with get_sessionmaker()() as session:
         rows = await session.execute(
             select(models.ChatMessage)
+            .where(models.ChatMessage.user_id == user_id)
             .order_by(models.ChatMessage.created_at.desc())
             .limit(limit)
         )
@@ -73,10 +77,10 @@ async def recent_history(limit: int = 40) -> list[dict]:
     return [{"role": m.role, "content": m.content} for m in msgs]
 
 
-async def save_message(role: str, content: str) -> None:
+async def save_message(user_id: int, role: str, content: str) -> None:
     await ensure_db()
     async with get_sessionmaker()() as session:
-        session.add(models.ChatMessage(role=role, content=content))
+        session.add(models.ChatMessage(user_id=user_id, role=role, content=content))
         await session.commit()
 
 
@@ -86,6 +90,7 @@ async def save_message(role: str, content: str) -> None:
 
 
 async def apply_profile_update(
+    user_id: int,
     *,
     name: str = "",
     weight_unit: str = "",
@@ -95,12 +100,15 @@ async def apply_profile_update(
     daily_calorie_target: int = 0,
     daily_protein_target_g: int = 0,
 ) -> dict:
-    """Upsert the singleton profile with any provided fields; return its summary."""
+    """Upsert the user's profile with any provided fields; return its summary."""
     await ensure_db()
     async with get_sessionmaker()() as session:
-        p = await session.get(models.UserProfile, _PROFILE_ID)
+        rows = await session.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        p = rows.scalar_one_or_none()
         if p is None:
-            p = models.UserProfile(id=_PROFILE_ID)
+            p = models.UserProfile(user_id=user_id)
             session.add(p)
         if name:
             p.name = name
@@ -136,14 +144,14 @@ _ALLOWED_FIELDS = {
 }
 
 
-async def _tool_update_user_profile(args: dict) -> str:
+async def _tool_update_user_profile(user_id: int, args: dict) -> str:
     fields = {k: v for k, v in args.items() if k in _ALLOWED_FIELDS and v not in ("", None)}
-    saved = await apply_profile_update(**fields)
+    saved = await apply_profile_update(user_id, **fields)
     return f"Saved. Current profile: {saved}"
 
 
-async def _tool_get_user_profile(args: dict) -> str:
-    summary = profile_summary(await load_profile())
+async def _tool_get_user_profile(user_id: int, args: dict) -> str:
+    summary = profile_summary(await load_profile(user_id))
     return str(summary) if summary else "No profile saved yet."
 
 
@@ -186,8 +194,9 @@ MEMORY_TOOL_SPECS: list[dict] = [
     },
 ]
 
-# name -> async callable(args_dict) -> result string
-MEMORY_DISPATCH = {
-    "update_user_profile": _tool_update_user_profile,
-    "get_user_profile": _tool_get_user_profile,
-}
+def memory_dispatch(user_id: int) -> dict:
+    """name -> async callable(args) -> str, bound to a specific user."""
+    return {
+        "update_user_profile": partial(_tool_update_user_profile, user_id),
+        "get_user_profile": partial(_tool_get_user_profile, user_id),
+    }

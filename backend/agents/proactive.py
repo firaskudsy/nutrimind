@@ -35,9 +35,11 @@ def meal_check(meal: str) -> str:
     )
 
 
-async def proactive_message(instruction: str, source: str = "proactive") -> str | None:
+async def proactive_message(
+    instruction: str, user_id: int, source: str = "proactive"
+) -> str | None:
     """Run a proactive instruction; return the message to send, or None to suppress."""
-    reply = (await run_turn(instruction, source=source)).strip()
+    reply = (await run_turn(instruction, user_id=user_id, source=source)).strip()
     if not reply or reply.upper().startswith(NO_NUDGE):
         return None
     return reply

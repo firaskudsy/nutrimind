@@ -1,13 +1,24 @@
 """SQLAlchemy ORM models — the source of truth for NutriMind.
 
-Single-user system. Postgres in prod (SQLite for local dev/tests). JSON columns
-use the portable `JSON` type so the same models run on both backends.
+Multi-user: rows carry a `user_id` (FK to users.id) so each person's profile,
+chat, logs, and usage are their own. Postgres in prod (SQLite for local
+dev/tests). JSON columns use the portable `JSON` type for both backends.
 """
 
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -18,11 +29,14 @@ def _utcnow() -> datetime:
 
 
 class UserProfile(Base):
-    """Single-row profile injected into the agent's cached system prompt."""
+    """Per-user profile injected into the agent's system prompt (one per user)."""
 
     __tablename__ = "user_profile"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), unique=True, index=True
+    )
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     weight_unit: Mapped[str] = mapped_column(String(8), default="lbs")
     goals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -40,6 +54,7 @@ class Meal(Base):
     __tablename__ = "meals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
@@ -62,6 +77,7 @@ class Weight(Base):
     __tablename__ = "weights"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     value: Mapped[float] = mapped_column(Float)
     unit: Mapped[str] = mapped_column(String(8), default="lbs")
@@ -77,6 +93,7 @@ class Metric(Base):
     __tablename__ = "metrics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     source: Mapped[str] = mapped_column(String(32), index=True)  # e.g. fitbit
     type: Mapped[str] = mapped_column(String(32), index=True)  # sleep|steps|hr|activity
@@ -109,6 +126,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String(16), index=True)
     content: Mapped[str] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -157,6 +175,7 @@ class UsageRecord(Base):
     __tablename__ = "usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )

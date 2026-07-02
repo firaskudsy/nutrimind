@@ -66,11 +66,11 @@ async def test_tool_loop_executes_and_returns_final(agent_env, monkeypatch):
 
     monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
 
-    reply = await nutrition_agent.run_turn("remember I want 150g protein a day")
+    reply = await nutrition_agent.run_turn("remember I want 150g protein a day", user_id=1)
     assert reply == "Got it — saved your protein target."
 
-    # The memory tool actually ran and persisted to the DB.
-    profile = await memory.load_profile()
+    # The memory tool actually ran and persisted to the DB (for user 1).
+    profile = await memory.load_profile(1)
     assert profile.name == "Alex"
     assert profile.targets["protein_g"] == 150
 
@@ -82,5 +82,5 @@ async def test_plain_answer_no_tools(agent_env, monkeypatch):
         return _response(content="Hello! How can I help?")
 
     monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
-    reply = await nutrition_agent.run_turn("hi")
+    reply = await nutrition_agent.run_turn("hi", user_id=1)
     assert reply == "Hello! How can I help?"
