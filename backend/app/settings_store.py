@@ -28,6 +28,7 @@ class SettingSpec:
 # The settings surfaced in the web UI, in display order.
 SETTINGS_SCHEMA: list[SettingSpec] = [
     SettingSpec("agent_model", "AGENT_MODEL", "LLM model", "LLM"),
+    SettingSpec("agent_api_base", "AGENT_API_BASE", "Local model server URL", "LLM"),
     SettingSpec("anthropic_api_key", "ANTHROPIC_API_KEY", "Anthropic API key", "LLM", secret=True),
     SettingSpec("gemini_api_key", "GEMINI_API_KEY", "Gemini API key", "LLM", secret=True),
     SettingSpec("openai_api_key", "OPENAI_API_KEY", "OpenAI API key", "LLM", secret=True),
@@ -46,6 +47,7 @@ MODEL_CHOICES = [
     {"value": "anthropic/claude-opus-4-8", "label": "Claude Opus 4.8 (best)"},
     {"value": "gemini/gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite (cheapest)"},
     {"value": "gpt-4o-mini", "label": "GPT-4o mini"},
+    {"value": "ollama_chat/gemma4:e4b", "label": "Gemma 4 E4B (local, via Ollama)"},
 ]
 
 
@@ -116,3 +118,7 @@ async def provider_api_key(model: str) -> str | None:
 
 async def agent_model(default: str) -> str:
     return (await get_effective("agent_model")) or default
+
+
+async def agent_api_base(default: str) -> str | None:
+    return (await get_effective("agent_api_base")) or default or None
