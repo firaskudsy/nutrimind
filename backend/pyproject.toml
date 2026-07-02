@@ -23,6 +23,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "pyjwt>=2.8.0",
     "google-auth>=2.30.0",
+    "matplotlib>=3.8",
 ]
 
 [project.scripts]

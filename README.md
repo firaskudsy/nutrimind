@@ -34,6 +34,7 @@ _Screenshots coming soon — chatting, logging a meal from a photo, the weekly r
 - 😴 **Fitbit / Google Health** — sleep, steps, activity, heart rate feed the advice
 - 🧠 **Memory** — remembers goals, allergies, targets, preferences (persists across restarts)
 - ⏰ **Proactive 24/7 nudges** — weigh-in prompt, missed-meal checks, weekly review
+- 📈 **`/trends`** — an image of weight, calorie & sleep charts for the last week / month
 - 📊 **`/usage`** — tokens & cost for today / 7 days / 30 days
 - 🔀 **Any LLM** via LiteLLM — `AGENT_MODEL=anthropic/claude-haiku-4-5` (or Gemini / GPT)
 - 🐳 **One-command Docker** deployment
@@ -111,6 +112,7 @@ CRONOMETER_PASSWORD=your-password
 6. *(Optional)* In BotFather, `/setcommands` for your bot and paste:
    ```
    help - What I can do
+   trends - Weight, calories & sleep charts
    review - Weekly health review
    usage - Token usage & cost
    whoami - Your Telegram ID
@@ -206,7 +208,8 @@ Just talk to the bot:
 - *“How many calories have I logged today?”* / *“How did I sleep this week?”*
 - *“I’m vegetarian, allergic to peanuts, aiming for 160g protein”* → it remembers
 
-Commands: `/help`, `/review` (weekly review), `/usage` (tokens & cost), `/whoami`.
+Commands: `/help`, `/trends` (weight, calories & sleep charts — last week / month),
+`/review` (weekly review), `/usage` (tokens & cost), `/whoami`.
 
 ---
 
