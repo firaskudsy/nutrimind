@@ -1,6 +1,6 @@
 """Pure-function tests for the /plan calorie/protein math (no DB, no LLM)."""
 
-from agents.proactive import _bmr_kcal, _calorie_tiers, _protein_target_g
+from agents.proactive import _bmr_kcal, _calorie_tiers, _protein_target_g, macro_targets_g
 
 
 def test_bmr_matches_mifflin_st_jeor_male():
@@ -46,3 +46,19 @@ def test_protein_target_scales_with_weight_and_is_bounded():
     assert 90 <= tiny_lo <= tiny_hi
     huge_lo, huge_hi = _protein_target_g(weight_kg=250)
     assert huge_lo <= huge_hi <= 200
+
+
+def test_macro_targets_sum_to_the_calorie_target():
+    targets = macro_targets_g(weight_kg=146.76, height_cm=171, age=51, sex="male", calorie_target=1700)
+    assert targets["calories"] == 1700
+    kcal_from_macros = targets["protein"] * 4 + targets["carbs"] * 4 + targets["fat"] * 9
+    assert abs(kcal_from_macros - 1700) <= 5  # rounding-only slack
+    assert targets["fat"] == round(1700 * 0.30 / 9)
+    assert targets["fiber"] == round(1700 / 1000 * 14)
+
+
+def test_macro_targets_falls_back_to_moderate_calorie_tier_when_unset():
+    bmr = _bmr_kcal(70, 165, 30, "female")
+    moderate_low = _calorie_tiers(bmr)["moderate_low"]
+    targets = macro_targets_g(weight_kg=70, height_cm=165, age=30, sex="female")
+    assert targets["calories"] == moderate_low

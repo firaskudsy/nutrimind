@@ -88,6 +88,38 @@ def _protein_target_g(weight_kg: float) -> tuple[int, int]:
     return round(center - 10), round(center + 10)
 
 
+def macro_targets_g(
+    weight_kg: float,
+    height_cm: float,
+    age: int,
+    sex: str,
+    calorie_target: int | None = None,
+) -> dict[str, int]:
+    """Reference daily targets (grams) for the dashboard's macro chart.
+
+    Protein reuses /plan's 1g/kg rule (midpoint of its range). Fat is the AMDR
+    midpoint (30% of calories, 9 kcal/g) -- Dietary Guidelines for Americans
+    puts fat at 20-35% of calories. Carbs take whatever calories are left, so
+    the three always sum to the calorie target rather than being independently
+    set percentages that could overshoot it. Fiber follows the standard
+    14g-per-1000-kcal guideline (IOM / Dietary Guidelines for Americans).
+    """
+    if calorie_target is None:
+        calorie_target = _calorie_tiers(_bmr_kcal(weight_kg, height_cm, age, sex))["moderate_low"]
+    protein_lo, protein_hi = _protein_target_g(weight_kg)
+    protein = (protein_lo + protein_hi) / 2
+    fat = calorie_target * 0.30 / 9
+    carbs = max(calorie_target - protein * 4 - fat * 9, 0) / 4
+    fiber = calorie_target / 1000 * 14
+    return {
+        "calories": round(calorie_target),
+        "protein": round(protein),
+        "carbs": round(carbs),
+        "fat": round(fat),
+        "fiber": round(fiber),
+    }
+
+
 async def diet_plan(user_id: int) -> str:
     """Generate the /plan calorie & macro framework from profile + weight + labs.
 

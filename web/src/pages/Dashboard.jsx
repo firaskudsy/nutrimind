@@ -67,16 +67,20 @@ function ChartCard({ i, title, subtitle, children }) {
 
 function ChartTip({ active, payload, label, unit, c }) {
   if (!active || !payload?.length) return null;
+  const multi = payload.length > 1;
   return (
     <div
       className="rounded-lg border px-3 py-2 text-xs shadow-soft"
       style={{ background: c.surface, color: c.ink, borderColor: c.grid }}
     >
       <div className="text-muted">{label}</div>
-      <div className="font-semibold">
-        {payload[0].value}
-        {unit ? ` ${unit}` : ""}
-      </div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="font-semibold">
+          {multi && <span className="font-normal text-muted">{p.name}: </span>}
+          {p.value}
+          {unit ? ` ${unit}` : ""}
+        </div>
+      ))}
     </div>
   );
 }
@@ -106,12 +110,15 @@ export default function Dashboard() {
         { name: "30 days", cost: +(data.usage.month.cost || 0).toFixed(3) },
       ]
     : [];
+  const targets = data?.macro_targets;
   const macroBars = [
-    { name: "Protein", g: macros.protein },
-    { name: "Carbs", g: macros.carbs },
-    { name: "Fat", g: macros.fat },
-    { name: "Fiber", g: macros.fiber },
-  ].filter((m) => m.g != null);
+    { name: "Protein", g: macros.protein, target: targets?.protein },
+    { name: "Carbs", g: macros.carbs, target: targets?.carbs },
+    { name: "Fat", g: macros.fat, target: targets?.fat },
+    { name: "Fiber", g: macros.fiber, target: targets?.fiber },
+  ]
+    .filter((m) => m.g != null)
+    .map((m) => ({ ...m, g: Math.round(m.g) }));
 
   const name = data?.profile?.name;
   const wUnit = data?.weights?.unit || data?.profile?.weight_unit || "lbs";
@@ -155,17 +162,45 @@ export default function Dashboard() {
           </ChartCard>
         </div>
 
-        <ChartCard i={6} title="Macros today" subtitle="grams consumed">
+        <ChartCard
+          i={6}
+          title="Macros today"
+          subtitle={targets ? "grams consumed vs. your daily target" : "grams consumed"}
+        >
           {macroBars.length ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={macroBars} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTip unit="g" c={c} />} cursor={{ fill: `${c.accent}12` }} />
-                <Bar dataKey="g" fill={c.accent} radius={[6, 6, 0, 0]} maxBarSize={38} />
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              {targets && (
+                <div className="mb-3 flex items-center gap-4 text-xs text-muted">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ background: c.accent }} />
+                    Consumed
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ background: c.axis }} />
+                    Target
+                  </span>
+                </div>
+              )}
+              <ResponsiveContainer width="100%" height={targets ? 208 : 240}>
+                <BarChart data={macroBars} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<ChartTip unit="g" c={c} />} cursor={{ fill: `${c.accent}12` }} />
+                  <Bar dataKey="g" name="Consumed" fill={c.accent} radius={[6, 6, 0, 0]} maxBarSize={28} />
+                  {targets && (
+                    <Bar
+                      dataKey="target"
+                      name="Target"
+                      fill={c.axis}
+                      fillOpacity={0.3}
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={28}
+                    />
+                  )}
+                </BarChart>
+              </ResponsiveContainer>
+            </>
           ) : (
             <Empty>Nothing logged today yet.</Empty>
           )}

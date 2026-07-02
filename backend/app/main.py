@@ -6,7 +6,6 @@ in on top of this in the next phase.
 """
 
 import base64
-import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -267,23 +266,40 @@ async def _cronometer_tool(tool: str, args: dict) -> dict | None:
     if ref is None:
         return None
     try:
-        result = await registry.call_tool(ref, tool, args)
-        text_out = result[0] if isinstance(result, list) and result else result
-        return json.loads(text_out) if isinstance(text_out, str) else text_out
+        result = trends._unwrap(await registry.call_tool(ref, tool, args))
     except Exception as exc:  # noqa: BLE001 - dashboard degrades gracefully
         logger.warning("cronometer %s failed: %s", tool, exc)
         return None
+    return result if isinstance(result, dict) else None
+
+
+def _latest_weight(weights: dict | None) -> float | None:
+    rows = ((weights or {}).get("history") or {}).get("data") or []
+    return max(rows, key=lambda r: r["day"])["value"] if rows else None
 
 
 @app.get("/api/dashboard")
 async def dashboard(user=Depends(authz.require_approved)) -> dict:
     """Aggregate data for the dashboard: cost, profile, nutrition, weight trend."""
     profile = memory.profile_summary(await memory.load_profile(user.id))
+    unit = profile.get("weight_unit") or "lbs"
+    weights = await _cronometer_tool("get_weight_history", {"unit": unit})
+
+    macro_targets = None
+    latest_weight = _latest_weight(weights)
+    if latest_weight is not None and all(profile.get(f) for f in ("age", "sex", "height_cm")):
+        weight_kg = latest_weight * 0.45359237 if unit == "lbs" else latest_weight
+        calorie_target = (profile.get("targets") or {}).get("calories")
+        macro_targets = proactive.macro_targets_g(
+            weight_kg, profile["height_cm"], profile["age"], profile["sex"], calorie_target
+        )
+
     return {
         "usage": await usage.usage_summary(user.id),
         "profile": profile,
         "nutrition_today": await _cronometer_tool("get_daily_nutrition", {}),
-        "weights": await _cronometer_tool("get_weight_history", {"unit": profile.get("weight_unit") or "lbs"}),
+        "weights": weights,
+        "macro_targets": macro_targets,
     }
 
 
