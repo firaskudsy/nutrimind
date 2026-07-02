@@ -117,6 +117,40 @@ class ChatMessage(Base):
     )
 
 
+class User(Base):
+    """A person who signs in with Google. Gated by admin approval."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picture: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    google_sub: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    role: Mapped[str] = mapped_column(String(16), default="user")  # user | admin
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|rejected
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
+class Setting(Base):
+    """Runtime app configuration editable from the web UI (key/value).
+
+    Overrides the corresponding .env default when present. Used for the chosen
+    LLM model, provider API keys, and integration credentials. Single-user,
+    self-hosted — values are stored as-is.
+    """
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
 class UsageRecord(Base):
     """One LLM API call's token usage and cost (for the /usage report)."""
 

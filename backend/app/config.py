@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     api_bearer_token: str = ""
     log_level: str = "INFO"
 
+    # Auth (Google sign-in + admin approval)
+    admin_email: str = ""  # this Google account is auto-approved as admin
+    google_client_id: str = ""  # OAuth Web client ID (audience for ID tokens)
+    session_secret: str = ""  # HMAC secret for session JWTs (set in prod!)
+    session_ttl_hours: int = 720  # 30 days
+
     # LLM (via LiteLLM). Provider keys are read from the environment by LiteLLM:
     # ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, etc.
     anthropic_api_key: str = ""

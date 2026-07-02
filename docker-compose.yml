@@ -46,16 +46,33 @@ services:
       # agent simply skips Google Health.
       - ${HOME}/.google-health-mcp:/root/.google-health-mcp
 
-  # The FastAPI backend (Phase 2 / Flutter app) — not needed for the Telegram bot.
-  # Uncomment to run it too.
-  # backend:
-  #   build: ./backend
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   environment:
-  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
-  #   depends_on: { db: { condition: service_healthy } }
-  #   ports: ["8000:8000"]
+  # FastAPI backend — serves the web app's API (/api/*). Shares the DB + agent
+  # with the Telegram bot.
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CRONOMETER_MCP_URL: http://cronometer-mcp:8001/mcp
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nutrimind}
+    depends_on:
+      db:
+        condition: service_healthy
+      cronometer-mcp:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${HOME}/.google-health-mcp:/root/.google-health-mcp
+
+  # Web app (React) served by nginx, which proxies /api to the backend.
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
 
 volumes:
   pgdata:

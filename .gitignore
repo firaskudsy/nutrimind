@@ -37,7 +37,7 @@ CLAUDE.md
 .idea/
 .vscode/
 
-# Flutter (Phase 2)
-app/build/
-app/.dart_tool/
-app/.flutter-plugins*
+# Web frontend
+web/node_modules/
+web/dist/
+web/.vite/
