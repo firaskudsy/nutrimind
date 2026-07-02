@@ -4,9 +4,19 @@ Each check asks the agent to either produce a short user-facing message or, when
 no nudge is warranted, reply with the NO_NUDGE sentinel — which the scheduler
 suppresses. This keeps decisions (did I log lunch? is a nudge useful?) with the
 model and its Cronometer/Fitbit tools rather than hard-coded parsing.
+
+`diet_plan` (the /plan command) follows the same "instruction through run_turn"
+pattern, but pre-computes its calorie/protein anchors in Python (Mifflin-St Jeor
++ standard deficit-tier math) rather than trusting the LLM to do that arithmetic
+-- these are safety-relevant numbers, so the model is told to use them as given
+and layer qualitative, condition-aware judgment (blood markers, injuries) on top.
 """
 
+from datetime import date, timedelta
+
+from agents import memory
 from agents.nutrition_agent import run_turn
+from agents.trends import _fetch_weight
 
 NO_NUDGE = "NO_NUDGE"
 
@@ -43,3 +53,121 @@ async def proactive_message(
     if not reply or reply.upper().startswith(NO_NUDGE):
         return None
     return reply
+
+
+# ------------------------------------------------------------------
+# /plan -- personalized calorie/macro framework
+# ------------------------------------------------------------------
+
+
+def _bmr_kcal(weight_kg: float, height_cm: float, age: int, sex: str) -> float:
+    """Mifflin-St Jeor BMR -- the modern standard formula, more accurate than Harris-Benedict."""
+    base = 10 * weight_kg + 6.25 * height_cm - 5 * age
+    return base - 161 if sex.strip().lower().startswith("f") else base + 5
+
+
+def _calorie_tiers(bmr: float) -> dict[str, int]:
+    """Sedentary-anchored maintenance + standard deficit tiers (3,500 kcal/lb rule).
+
+    Sedentary (BMR x 1.2) is used as the maintenance anchor rather than a higher
+    activity multiplier -- a safer default than assuming activity the agent can't
+    verify, and appropriate given this command is often used by people managing a
+    mobility-limiting condition. The agent is told it may note real activity data
+    from Google Health as a qualitative caveat without changing these anchors.
+    A 1,200 kcal/day floor guards against recommending an unsafe deficit for a
+    lighter person.
+    """
+    maintenance = bmr * 1.2
+    return {
+        "maintenance": round(maintenance),
+        "moderate_low": round(maintenance - 500),
+        "moderate_high": round(maintenance - 250),
+        "aggressive_low": round(max(maintenance - 750, 1200)),
+        "aggressive_high": round(max(maintenance - 500, 1200)),
+    }
+
+
+def _protein_target_g(weight_kg: float) -> tuple[int, int]:
+    """~1 g protein per kg body weight, the standard simplified cut-preservation rule.
+
+    The center is clamped to [100, 190] *before* the +-10g band is applied, so the
+    low/high bounds stay within [90, 200] AND low <= high always holds -- clamping
+    each bound independently (as an earlier version of this did) can invert the
+    range for an extreme weight (e.g. produce a 240-200 "range").
+    """
+    center = min(max(weight_kg * 1.0, 100), 190)
+    return round(center - 10), round(center + 10)
+
+
+async def diet_plan(user_id: int) -> str:
+    """Generate the /plan calorie & macro framework from profile + weight + labs.
+
+    Two pieces of load-bearing arithmetic (calorie tiers, protein range) are
+    computed here deterministically and handed to the agent as fixed anchors --
+    everything qualitative (which tier to recommend, how blood markers and
+    physical conditions should shape the framing, the required wellness
+    disclaimer) is left to the model, consistent with how the rest of the app
+    treats LLM judgment vs. hard numbers.
+    """
+    profile = await memory.load_profile(user_id)
+    summary = memory.profile_summary(profile)
+    missing = [
+        field
+        for field, label in (("age", "age"), ("sex", "sex"), ("height_cm", "height"))
+        if not summary.get(field)
+    ]
+    if missing:
+        return (
+            "I need a bit more info before I can build your plan: "
+            f"{', '.join(missing)}. Tell me and I'll remember it, then run /plan again."
+        )
+
+    unit = summary.get("weight_unit") or "lbs"
+    today = date.today()
+    weights = await _fetch_weight(unit, today - timedelta(days=30), today)
+    if not weights:
+        return (
+            "I don't have a recent weight on file. Log your current weight, "
+            "then run /plan again."
+        )
+    latest_day = max(weights)
+    weight_native = weights[latest_day]
+    weight_kg = weight_native * 0.45359237 if unit == "lbs" else weight_native
+
+    bmr = _bmr_kcal(weight_kg, summary["height_cm"], summary["age"], summary["sex"])
+    tiers = _calorie_tiers(bmr)
+    protein_lo, protein_hi = _protein_target_g(weight_kg)
+
+    markers = await memory.latest_health_markers(user_id)
+    labs_text = (
+        "; ".join(f"{k}: {v['value']} {v['unit'] or ''}".strip() for k, v in markers.items())
+        or "none recorded"
+    )
+    conditions_text = summary.get("conditions") or "none recorded"
+
+    instruction = (
+        "Produce the user's personalized weight-loss/diet plan as calorie and protein "
+        "targets. Use EXACTLY these precomputed numbers -- do not recompute or alter them:\n"
+        f"- Current weight: {weight_native} {unit} (as of {latest_day.isoformat()})\n"
+        f"- Maintenance: ~{tiers['maintenance']} calories/day\n"
+        f"- Moderate loss (0.5-1 lb/week): ~{tiers['moderate_low']}-{tiers['moderate_high']} "
+        "calories/day\n"
+        "- Aggressive loss (1-1.5 lbs/week, max safe deficit): "
+        f"~{tiers['aggressive_low']}-{tiers['aggressive_high']} calories/day\n"
+        f"- Protein target: {protein_lo}-{protein_hi}g daily\n\n"
+        f"Health conditions on file: {conditions_text}\n"
+        f"Recent lab/blood-test values on file: {labs_text}\n\n"
+        "Present the three tiers, then recommend ONE specific target with a brief reason "
+        "tied to their conditions (e.g. sustainability and joint/back load if a back "
+        "condition is on file). If lab values suggest a cardiometabolic pattern (e.g. "
+        "elevated LDL/triglycerides, low HDL), let that inform the dietary emphasis "
+        "(fiber, added sugar, saturated fat) without diagnosing anything or naming a "
+        "specific medical condition -- and tell them to discuss the labs with their "
+        "doctor. If a condition limits exercise, don't recommend specific exercise "
+        "intensity -- defer to their physician/physical therapist. Give the protein "
+        "target with a one-line reason (muscle preservation, satiety). End with the "
+        "standard wellness disclaimer: this is general guidance, not medical advice. "
+        "Match the style already used elsewhere: concise, plain text, no markdown."
+    )
+    reply = (await run_turn(instruction, user_id=user_id, source="plan")).strip()
+    return reply or "Sorry -- couldn't build your plan this time. Try again in a moment."

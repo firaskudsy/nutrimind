@@ -69,6 +69,7 @@ HELP_TEXT = (
     "• Ask about today's calories/nutrition, your weight trend, or your Fitbit sleep/steps\n"
     "• Tell me your goals, allergies, and preferences — I'll remember them\n\n"
     "Commands:\n"
+    "/plan — your personalized calorie & protein plan\n"
     "/trends — charts of your weight, calories & sleep (week / month)\n"
     "/review — weekly review (diet + weight + Fitbit)\n"
     "/usage — token usage & cost (today / 7d / 30d)\n"
@@ -134,6 +135,20 @@ async def review(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Sorry — review failed: {exc}")
         return
     await update.message.reply_text(msg or "Not enough data yet for a review.")
+
+
+async def plan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """On-demand personalized calorie/macro plan from profile, weight, and labs."""
+    if not _allowed(update) or update.message is None:
+        return
+    await update.message.reply_text("Building your plan — one moment...")
+    try:
+        msg = await proactive.diet_plan(ctx.bot_data["admin_id"])
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("diet plan failed")
+        await update.message.reply_text(f"Sorry — couldn't build your plan: {exc}")
+        return
+    await update.message.reply_text(msg)
 
 
 async def trends_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -227,6 +242,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("whoami", whoami))
     app.add_handler(CommandHandler("review", review))
+    app.add_handler(CommandHandler("plan", plan_cmd))
     app.add_handler(CommandHandler("trends", trends_cmd))
     app.add_handler(CommandHandler("usage", usage_cmd))
     app.add_handler(

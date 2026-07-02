@@ -39,8 +39,12 @@ class UserProfile(Base):
     )
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     weight_unit: Mapped[str] = mapped_column(String(8), default="lbs")
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sex: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     goals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     allergies: Mapped[list[str]] = mapped_column(JSON, default=list)
+    conditions: Mapped[list[str]] = mapped_column(JSON, default=list)
     preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     targets: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
