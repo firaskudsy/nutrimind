@@ -186,6 +186,8 @@ def add_food_entry(
         translation_id: Translation ID from search results (usually 0).
         diary_group: Meal slot -- one of "auto", "breakfast", "lunch",
                      "dinner", "snacks" (case-insensitive, default "auto").
+                     Descriptive variants like "afternoon snack" or "evening
+                     snack" are also accepted and mapped to "snacks".
         time: Time the food was eaten as 24-hour "HH:MM" (e.g. "16:30").
               IMPORTANT: when the user states a time, always pass it here --
               it sets the diary entry's timestamp AND, with diary_group="auto",
@@ -201,6 +203,18 @@ def add_food_entry(
         }
         group_key = diary_group.strip().lower()
         group_int = group_map.get(group_key)
+        if group_int is None:
+            # Be lenient about descriptive phrasing like "evening snack" or
+            # "afternoon snack" -- match on the meal keyword it contains.
+            for keyword, value in (
+                ("breakfast", 1),
+                ("lunch", 2),
+                ("dinner", 3),
+                ("snack", 4),
+            ):
+                if keyword in group_key:
+                    group_int = value
+                    break
         if group_int is None:
             return _err(
                 ValueError(
