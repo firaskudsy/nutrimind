@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     # LiteLLM model string. Switch providers by changing this one value, e.g.:
     #   anthropic/claude-haiku-4-5 | anthropic/claude-sonnet-4-6 | anthropic/claude-opus-4-8
-    #   gemini/gemini-2.5-flash-lite | gpt-4o-mini | ollama_chat/gemma4:e4b
+    #   gemini/gemini-2.5-flash-lite | gpt-4o-mini | gpt-5.5-pro | ollama_chat/gemma4:e4b
     agent_model: str = "anthropic/claude-haiku-4-5"
     # Only used for local providers (ollama_chat/...). Docker Desktop resolves
     # host.docker.internal to the Mac itself, since Ollama runs natively there

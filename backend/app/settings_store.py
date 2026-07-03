@@ -47,6 +47,7 @@ MODEL_CHOICES = [
     {"value": "anthropic/claude-opus-4-8", "label": "Claude Opus 4.8 (best)"},
     {"value": "gemini/gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite (cheapest)"},
     {"value": "gpt-4o-mini", "label": "GPT-4o mini"},
+    {"value": "gpt-5.5-pro", "label": "GPT-5.5 Pro (best OpenAI, expensive)"},
     {"value": "ollama_chat/gemma4:e4b", "label": "Gemma 4 E4B (local, via Ollama)"},
 ]
 

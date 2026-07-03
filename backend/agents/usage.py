@@ -28,6 +28,7 @@ _FALLBACK_PRICES = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-3.1-flash-lite": (0.25, 1.50),
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-5.5-pro": (30.0, 180.0),
 }
 
 

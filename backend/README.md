@@ -53,6 +53,7 @@ AGENT_MODEL=anthropic/claude-haiku-4-5     # default, cheapest Claude   (ANTHROP
 AGENT_MODEL=anthropic/claude-sonnet-4-6    # more reasoning             (ANTHROPIC_API_KEY)
 AGENT_MODEL=gemini/gemini-2.5-flash-lite   # very cheap                 (GEMINI_API_KEY)
 AGENT_MODEL=gpt-4o-mini                     # cheap                      (OPENAI_API_KEY)
+AGENT_MODEL=gpt-5.5-pro                     # best OpenAI, expensive     (OPENAI_API_KEY)
 ```
 
 - `agents/nutrition_agent.py` — core `run_turn()` (MCP tools + vision + prompt caching)
