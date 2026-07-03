@@ -220,6 +220,17 @@ def add_food_entry(
             diary_group=group_int,
             at_time=time,
         )
+
+        # A response without a real serving ID means Cronometer didn't actually
+        # create the entry, even though the call returned without raising.
+        if not result.get("id"):
+            return _err(
+                RuntimeError(
+                    "Cronometer did not return a serving ID for this entry -- treat "
+                    "this as NOT logged and tell the user it failed."
+                )
+            )
+
         return _ok(
             {
                 "entry": result,
@@ -254,9 +265,19 @@ def remove_food_entry(
         client = _get_client()
         day = _parse_date(date)
         result = client.delete_entries(entry_ids, day)
+        removed = result.get("removed", [])
+
+        if not removed:
+            return _err(
+                RuntimeError(
+                    "Cronometer reported 0 entries removed -- treat this as NOT removed "
+                    "and tell the user it failed."
+                )
+            )
+
         return _ok(
             {
-                "removed": result.get("removed", []),
+                "removed": removed,
                 "count": result.get("count", 0),
                 "date": date or str(date_module_today()),
             }
@@ -707,12 +728,33 @@ def log_weight(value: float, unit: str = "lbs", date: str | None = None) -> str:
     """
     try:
         client = _get_client()
-        day = _parse_date(date)
+        day = _parse_date(date) or date_module_today()
         result = client.add_biometric("weight", value, unit=unit, day=day)
+
+        # Cronometer's API has returned a 200/"success" response for a write that
+        # never actually persisted. Re-fetch and confirm the value landed before
+        # calling this a success -- otherwise the agent ends up confidently
+        # telling the user something is logged when it isn't.
+        history = client.get_biometric_history("weight", unit=unit, start=day, end=day)
+        entries = (history or {}).get("data") or []
+        confirmed = any(
+            e.get("day") == day.isoformat() and abs(float(e.get("value", 0)) - value) < 0.1
+            for e in entries
+        )
+        if not confirmed:
+            return _err(
+                RuntimeError(
+                    f"Cronometer accepted the write but {value} {unit} for {day.isoformat()} "
+                    "does not appear in weight history afterward -- treat this as NOT logged "
+                    "and tell the user it failed."
+                )
+            )
+
         return _ok(
             {
                 "logged": {"metric": "weight", "value": value, "unit": unit},
-                "date": date or str(date_module_today()),
+                "date": day.isoformat(),
+                "verified": True,
                 "result": result,
             }
         )

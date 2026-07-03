@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
+import Activity from "./pages/Activity.jsx";
 import Admin from "./pages/Admin.jsx";
 import Chat from "./pages/Chat.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Login from "./pages/Login.jsx";
+import Pantry from "./pages/Pantry.jsx";
 import Pending from "./pages/Pending.jsx";
 import Prompts from "./pages/Prompts.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -40,6 +42,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/chat" element={<Chat />} />
+        <Route path="/pantry" element={<Pantry />} />
+        <Route path="/activity" element={<Activity />} />
         <Route path="/settings" element={<Settings />} />
         {user.role === "admin" && <Route path="/members" element={<Admin />} />}
         {user.role === "admin" && <Route path="/prompts" element={<Prompts />} />}

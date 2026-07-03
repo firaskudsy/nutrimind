@@ -27,6 +27,9 @@ from app.schemas import (
     HealthOut,
     LoginIn,
     LoginOut,
+    PantryItemCreate,
+    PantryItemOut,
+    PantryItemUpdate,
     ProfileUpdate,
     PromptsUpdate,
     SettingsUpdate,
@@ -173,6 +176,48 @@ async def put_profile(payload: ProfileUpdate, user=Depends(authz.require_approve
     return {"profile": await memory.replace_profile_fields(user.id, fields)}
 
 
+@app.get("/api/pantry")
+async def get_pantry(user=Depends(authz.require_approved)) -> dict:
+    """The signed-in user's available-at-home foods -- the assistant's first source for meals."""
+    items = await memory.load_pantry(user.id)
+    return {"items": [PantryItemOut.model_validate(i) for i in items]}
+
+
+@app.post("/api/pantry")
+async def post_pantry(payload: PantryItemCreate, user=Depends(authz.require_approved)) -> dict:
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    item = await memory.add_pantry_item(user.id, payload.name, payload.notes or "")
+    return {"item": PantryItemOut.model_validate(item)}
+
+
+@app.put("/api/pantry/{item_id}")
+async def put_pantry(
+    item_id: int, payload: PantryItemUpdate, user=Depends(authz.require_approved)
+) -> dict:
+    fields = payload.model_dump(exclude_unset=True)
+    item = await memory.update_pantry_item(user.id, item_id, **fields)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Pantry item not found")
+    return {"item": PantryItemOut.model_validate(item)}
+
+
+@app.delete("/api/pantry/{item_id}")
+async def delete_pantry(item_id: int, user=Depends(authz.require_approved)) -> dict:
+    removed = await memory.delete_pantry_item(user.id, item_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Pantry item not found")
+    return {"removed": True}
+
+
+@app.get("/api/actions")
+async def get_actions(user=Depends(authz.require_approved)) -> dict:
+    """Ground-truth log of Cronometer writes the agent attempted -- for auditing
+    against what it claimed in chat."""
+    actions = await memory.recent_actions(user.id)
+    return {"actions": memory.action_log_summary(actions)}
+
+
 WEB_HELP_TEXT = (
     "I'm NutriMind — your nutrition & health assistant. You can:\n\n"
     "• Tell me what you plan to eat (and when) — I'll analyze it and log it to Cronometer\n"
@@ -277,6 +322,18 @@ async def _cronometer_tool(tool: str, args: dict) -> dict | None:
         logger.warning("cronometer %s failed: %s", tool, exc)
         return None
     return result if isinstance(result, dict) else None
+
+
+@app.get("/api/foods/search")
+async def search_foods(q: str, user=Depends(authz.require_approved)) -> dict:
+    """Search Cronometer's food database -- powers the Pantry page's autocomplete."""
+    q = q.strip()
+    if len(q) < 2:
+        return {"foods": []}
+    result = await _cronometer_tool("search_foods", {"query": q})
+    foods = (result or {}).get("foods") or []
+    names = list(dict.fromkeys(f["name"] for f in foods if f.get("name")))
+    return {"foods": names[:10]}
 
 
 def _latest_weight(weights: dict | None) -> float | None:

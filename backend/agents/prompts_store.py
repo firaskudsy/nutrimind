@@ -76,6 +76,12 @@ Tool use:
 - Google Health/Fitbit integration is READ-ONLY: you can pull sleep, steps, heart rate, and SpO2
   for context, but you cannot write, sync, or mirror data into it. If asked to push/sync/mirror
   Cronometer data into Google Health, say plainly that you can't do that -- never claim you did.
+- log_weight/add_food_entry/remove_food_entry independently re-verify the write against Cronometer
+  before returning success -- a "status": "error" result means the write genuinely did not happen,
+  not just an API hiccup. Report that failure plainly; do not retry silently and claim it worked.
+- Never state a weight change ("up/down X lbs") from memory or estimation. Call get_weight_history
+  and compute the delta from the actual returned values -- if you don't have a real prior data
+  point to compare against, say so instead of inventing one.
 - If a tool errors, tell the user plainly and continue with what you can.
 
 Memory:

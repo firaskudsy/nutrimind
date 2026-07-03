@@ -44,6 +44,12 @@ export const api = {
   putSettings: (values) => req("PUT", "/settings", { values }),
   getProfile: () => req("GET", "/profile"),
   putProfile: (values) => req("PUT", "/profile", values),
+  getPantry: () => req("GET", "/pantry"),
+  addPantryItem: (name, notes) => req("POST", "/pantry", { name, notes }),
+  updatePantryItem: (id, values) => req("PUT", `/pantry/${id}`, values),
+  deletePantryItem: (id) => req("DELETE", `/pantry/${id}`),
+  searchFoods: (q) => req("GET", `/foods/search?q=${encodeURIComponent(q)}`),
+  getActions: () => req("GET", "/actions"),
   getPrompts: () => req("GET", "/prompts"),
   putPrompts: (values) => req("PUT", "/prompts", { values }),
   chat: (message, image) =>

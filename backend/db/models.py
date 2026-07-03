@@ -52,6 +52,47 @@ class UserProfile(Base):
     )
 
 
+class PantryItem(Base):
+    """A food the user has at home / can readily buy.
+
+    Grounds meal-plan suggestions in what's actually available -- injected into
+    the agent's system prompt alongside the profile so it never has to be
+    looked up on demand.
+    """
+
+    __tablename__ = "pantry_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
+class ActionLog(Base):
+    """Ground-truth record of every write the agent attempted against Cronometer.
+
+    Populated from the actual tool result, independent of whatever the LLM told
+    the user in the same turn -- so a claim like "logged!" can be checked against
+    what really happened.
+    """
+
+    __tablename__ = "action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    source: Mapped[str] = mapped_column(String(20))  # "web" | "telegram" | "proactive"
+    tool_name: Mapped[str] = mapped_column(String(100))
+    arguments: Mapped[str] = mapped_column(Text)  # JSON
+    success: Mapped[bool] = mapped_column(Boolean)
+    detail: Mapped[str] = mapped_column(Text)  # tool's raw result text, truncated
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
 class Meal(Base):
     """A planned/analyzed/logged meal."""
 

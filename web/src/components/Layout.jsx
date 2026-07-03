@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import {
+  ClipboardList,
   LayoutGrid,
   LogOut,
   MessageCircle,
@@ -7,6 +8,7 @@ import {
   ScrollText,
   Settings2,
   ShieldCheck,
+  ShoppingBasket,
   Sun,
 } from "lucide-react";
 import { useState } from "react";
@@ -16,6 +18,8 @@ import { useTheme } from "../lib/theme.jsx";
 const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: LayoutGrid, end: true },
   { to: "/chat", label: "Chat", icon: MessageCircle },
+  { to: "/pantry", label: "Pantry", icon: ShoppingBasket },
+  { to: "/activity", label: "Activity Log", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 

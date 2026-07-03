@@ -5,6 +5,7 @@ we dispatch it (here a real memory tool writing to the DB), feed the result back
 and return the model's final text.
 """
 
+import contextlib
 import tempfile
 from types import SimpleNamespace
 
@@ -84,6 +85,114 @@ async def test_plain_answer_no_tools(agent_env, monkeypatch):
     monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
     reply = await nutrition_agent.run_turn("hi", user_id=1)
     assert reply == "Hello! How can I help?"
+
+
+async def test_write_tool_call_is_recorded_in_action_log(agent_env, monkeypatch):
+    """A Cronometer write tool's own verified result -- not the model's narration
+    -- must land in the action log, so a false "logged!" claim is auditable."""
+    nutrition_agent, memory = agent_env
+
+    fake_tool = SimpleNamespace(
+        name="log_weight",
+        description="Log weight",
+        inputSchema={"type": "object", "properties": {}},
+    )
+
+    class FakeSession:
+        async def list_tools(self):
+            return SimpleNamespace(tools=[fake_tool])
+
+        async def call_tool(self, name, args):
+            return SimpleNamespace(structuredContent={"status": "success", "logged": args})
+
+    @contextlib.asynccontextmanager
+    async def fake_open_session(_ref):
+        yield FakeSession()
+
+    ref = nutrition_agent.registry.ServerRef("cronometer", "http", url="http://fake")
+    monkeypatch.setattr(nutrition_agent.registry, "server_refs", lambda *_a, **_k: [ref])
+    monkeypatch.setattr(nutrition_agent.registry, "open_session", fake_open_session)
+
+    responses = iter(
+        [
+            _response(tool_calls=[_tool_call("log_weight", '{"value": 322.4, "unit": "lbs"}')]),
+            _response(content="Logged 322.4 lbs."),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
+
+    reply = await nutrition_agent.run_turn("322.4", user_id=1, source="chat")
+    assert reply == "Logged 322.4 lbs."
+
+    actions = await memory.recent_actions(1)
+    assert len(actions) == 1
+    assert actions[0].tool_name == "log_weight"
+    assert actions[0].success is True
+    assert actions[0].source == "chat"
+
+
+def test_claims_unverified_write_detection():
+    from agents.nutrition_agent import _claims_unverified_write
+
+    assert _claims_unverified_write("Done. Logged 322.4 lbs for today.")
+    assert _claims_unverified_write("Removed the old entry and added the new one.")
+    assert not _claims_unverified_write("I'll log that once you confirm the portion.")
+    assert not _claims_unverified_write("I wasn't able to log that -- try again?")
+    assert not _claims_unverified_write("That meal fits your calorie budget nicely.")
+
+
+async def test_unlogged_claim_triggers_correction_then_flags_if_repeated(agent_env, monkeypatch):
+    """The model claims a write with no tool call -- give it one corrective
+    retry; if it still won't call the tool or walk back the claim, flag it in
+    the action log so the mismatch is auditable even when auto-correction fails."""
+    nutrition_agent, memory = agent_env
+
+    responses = iter(
+        [
+            _response(content="Done. Logged 321.9 lbs for today."),
+            _response(content="Confirmed, logged 321.9 lbs -- all set."),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
+
+    reply = await nutrition_agent.run_turn("log 321.9 lbs", user_id=1, source="chat")
+    assert reply == "Confirmed, logged 321.9 lbs -- all set."
+
+    actions = await memory.recent_actions(1)
+    assert len(actions) == 1
+    assert actions[0].tool_name == "unverified_claim"
+    assert actions[0].success is False
+
+
+async def test_unlogged_claim_correction_succeeds_when_model_fixes_itself(agent_env, monkeypatch):
+    """If the model walks back its claim on the corrective retry, no flag is
+    recorded -- the backstop only fires once, and a clean correction is fine."""
+    nutrition_agent, memory = agent_env
+
+    responses = iter(
+        [
+            _response(content="Done. Logged 321.9 lbs for today."),
+            _response(content="Sorry, I actually didn't log that yet -- want me to now?"),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
+
+    reply = await nutrition_agent.run_turn("log 321.9 lbs", user_id=1, source="chat")
+    assert "didn't log" in reply
+
+    assert await memory.recent_actions(1) == []
 
 
 async def test_out_of_credits_raises_a_clean_agent_error(agent_env, monkeypatch):
