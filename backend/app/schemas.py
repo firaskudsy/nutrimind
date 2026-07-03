@@ -74,6 +74,24 @@ class ProfileUpdate(BaseModel):
     daily_protein_target_g: int | None = None
 
 
+# ---- Pantry (available-at-home foods) ----
+class PantryItemCreate(BaseModel):
+    name: str
+    notes: str | None = None
+
+
+class PantryItemUpdate(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+
+
+class PantryItemOut(ORMModel):
+    id: int
+    name: str
+    notes: str | None
+    created_at: datetime
+
+
 # ---- Chat ----
 class ChatMessageIn(BaseModel):
     content: str

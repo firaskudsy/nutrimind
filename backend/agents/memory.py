@@ -1,10 +1,10 @@
 """Persistence & memory for the assistant.
 
 Backs the agent's long-term memory (the user's goals, allergies, conditions,
-preferences, targets, and dated lab/health markers) and chat history with the
-app database. Exposes local tools the agent can call to read/update the
-profile and log lab results, plus helpers the bot uses for DB-backed
-conversation history.
+preferences, targets, dated lab/health markers, and pantry/available-foods
+list) and chat history with the app database. Exposes local tools the agent
+can call to read/update the profile and log lab results, plus helpers the bot
+uses for DB-backed conversation history.
 
 Everything is per-user (keyed by user_id). Free-text fields (goals/allergies/
 conditions/preferences) are stored as strings in the JSON columns; targets is
@@ -14,6 +14,7 @@ a small dict. Lab markers (e.g. LDL-C) reuse the shared Metric table
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime
 from functools import partial
@@ -289,6 +290,134 @@ async def _tool_log_health_marker(user_id: int, args: dict) -> str:
             pass
     await save_health_marker(user_id, marker, float(value), str(args.get("unit") or ""), day)
     return f"Saved {marker} = {value} {args.get('unit') or ''}".strip() + "."
+
+
+# ------------------------------------------------------------------
+# Pantry (available-at-home foods) -- injected into the system prompt so meal
+# suggestions are grounded in what the user actually has, rather than left to
+# a tool call the model may or may not think to make.
+# ------------------------------------------------------------------
+
+
+async def load_pantry(user_id: int) -> list[models.PantryItem]:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        rows = await session.execute(
+            select(models.PantryItem)
+            .where(models.PantryItem.user_id == user_id)
+            .order_by(models.PantryItem.name)
+        )
+        return list(rows.scalars())
+
+
+def pantry_summary(items: list[models.PantryItem]) -> list[dict]:
+    return [
+        {"id": i.id, "name": i.name, "notes": i.notes, "created_at": i.created_at.isoformat()}
+        for i in items
+    ]
+
+
+async def add_pantry_item(user_id: int, name: str, notes: str = "") -> models.PantryItem:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        item = models.PantryItem(user_id=user_id, name=name.strip(), notes=notes.strip() or None)
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def update_pantry_item(
+    user_id: int, item_id: int, *, name: str | None = None, notes: str | None = None
+) -> models.PantryItem | None:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        rows = await session.execute(
+            select(models.PantryItem).where(
+                models.PantryItem.id == item_id, models.PantryItem.user_id == user_id
+            )
+        )
+        item = rows.scalar_one_or_none()
+        if item is None:
+            return None
+        if name is not None:
+            item.name = name.strip()
+        if notes is not None:
+            item.notes = notes.strip() or None
+        await session.commit()
+        await session.refresh(item)
+        return item
+
+
+async def delete_pantry_item(user_id: int, item_id: int) -> bool:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        rows = await session.execute(
+            select(models.PantryItem).where(
+                models.PantryItem.id == item_id, models.PantryItem.user_id == user_id
+            )
+        )
+        item = rows.scalar_one_or_none()
+        if item is None:
+            return False
+        await session.delete(item)
+        await session.commit()
+        return True
+
+
+# ------------------------------------------------------------------
+# Action log -- ground-truth record of Cronometer writes the agent attempted,
+# independent of what it told the user. Lets a mismatch (LLM said "logged",
+# nothing actually landed) be caught by looking at real data instead of
+# trusting the same model to grade its own homework.
+# ------------------------------------------------------------------
+
+WRITE_TOOLS = {"log_weight", "add_food_entry", "remove_food_entry"}
+
+
+async def record_action(
+    user_id: int, source: str, tool_name: str, arguments: dict, success: bool, detail: str
+) -> None:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        session.add(
+            models.ActionLog(
+                user_id=user_id,
+                source=source,
+                tool_name=tool_name,
+                arguments=json.dumps(arguments),
+                success=success,
+                detail=detail[:2000],
+            )
+        )
+        await session.commit()
+
+
+async def recent_actions(user_id: int, limit: int = 50) -> list[models.ActionLog]:
+    await ensure_db()
+    async with get_sessionmaker()() as session:
+        rows = await session.execute(
+            select(models.ActionLog)
+            .where(models.ActionLog.user_id == user_id)
+            .order_by(models.ActionLog.created_at.desc())
+            .limit(limit)
+        )
+        return list(rows.scalars())
+
+
+def action_log_summary(items: list[models.ActionLog]) -> list[dict]:
+    return [
+        {
+            "id": i.id,
+            "source": i.source,
+            "tool_name": i.tool_name,
+            "arguments": json.loads(i.arguments),
+            "success": i.success,
+            "detail": i.detail,
+            "created_at": i.created_at.isoformat(),
+        }
+        for i in items
+    ]
 
 
 # OpenAI-format tool schemas (LiteLLM passes these to any provider).

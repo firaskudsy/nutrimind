@@ -13,6 +13,7 @@ import base64
 import contextlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -106,15 +107,17 @@ def _when_text() -> str:
     )
 
 
-async def _system_content(profile: models.UserProfile | None, model: str) -> Any:
+async def _system_content(
+    profile: models.UserProfile | None, pantry: list[models.PantryItem], model: str
+) -> Any:
     """Build the system message.
 
-    For Anthropic models, return two blocks so the stable core+profile is
+    For Anthropic models, return two blocks so the stable core+profile+pantry is
     prompt-cached (cache_control) while the volatile date/time — which changes
     every minute — sits in a separate uncached block. Other providers get a
     plain concatenated string.
     """
-    core = await build_system_prompt(profile)
+    core = await build_system_prompt(profile, pantry)
     when = _when_text()
     if model.startswith("anthropic/"):
         return [
@@ -200,10 +203,34 @@ def _assistant_dict(msg: Any) -> dict:
     return out
 
 
+def _tool_call_succeeded(result: str) -> bool:
+    """Whether a Cronometer write tool's own result reports success.
+
+    log_weight/add_food_entry/remove_food_entry return _ok()/_err() JSON with a
+    "status" field -- this is the tool's own verified outcome, not the model's
+    narration of it.
+    """
+    try:
+        return json.loads(result).get("status") == "success"
+    except (json.JSONDecodeError, AttributeError):
+        return False
+
+
 async def _execute_tool_calls(
-    tool_calls: list, dispatch: dict[str, Callable], messages: list[dict]
-) -> None:
-    """Run each tool call and append its result as a tool message."""
+    tool_calls: list,
+    dispatch: dict[str, Callable],
+    messages: list[dict],
+    *,
+    user_id: int,
+    source: str,
+) -> bool:
+    """Run each tool call and append its result as a tool message.
+
+    Returns True if any Cronometer write tool was called this turn (regardless
+    of whether it succeeded) -- used to catch the model claiming a write
+    happened when it never even attempted one.
+    """
+    wrote = False
     for tc in tool_calls:
         try:
             args = json.loads(tc.function.arguments or "{}")
@@ -215,7 +242,50 @@ async def _execute_tool_calls(
         except Exception as exc:  # noqa: BLE001 - report tool failure to the model
             logger.exception("tool %s failed", tc.function.name)
             result = f"Error running {tc.function.name}: {exc}"
+        if tc.function.name in memory.WRITE_TOOLS:
+            wrote = True
+            await memory.record_action(
+                user_id, source, tc.function.name, args, _tool_call_succeeded(result), result
+            )
         messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+    return wrote
+
+
+_CLAIM_RE = re.compile(r"\b(logged|re-logged|removed|deleted|updated|saved)\b", re.IGNORECASE)
+_NEGATED_CLAIM_RE = re.compile(
+    r"\b(not|n't|never|failed to|unable to|couldn't|wasn't|isn't|didn't|won't|can't)\b"
+    r"[\w\s,-]{0,25}\b(logged|re-logged|removed|deleted|updated|saved)\b",
+    re.IGNORECASE,
+)
+# Require the claim verb to co-occur with a Cronometer-diary concept -- otherwise
+# an honest "saved your protein target" (a memory-tool write, not Cronometer)
+# would false-positive.
+_DOMAIN_RE = re.compile(
+    r"\b(lbs?|kgs?|pounds?|kilograms?|weight|cronometer|diary|entry|entries|food|meal|"
+    r"calories?|kcal|grams?|serving)\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_unverified_write(reply: str) -> bool:
+    """Heuristic: does this reply claim a Cronometer write happened?
+
+    A backstop for the failure mode no tool-level fix can catch -- the model
+    narrating "Done, logged!" without calling any write tool at all this turn.
+    Imprecise by nature (text matching), so it only gates one bounded
+    correction attempt, never blocks a reply outright.
+    """
+    if not _CLAIM_RE.search(reply) or not _DOMAIN_RE.search(reply):
+        return False
+    return not _NEGATED_CLAIM_RE.search(reply)
+
+
+_UNVERIFIED_CLAIM_PROMPT = (
+    "SYSTEM CHECK: you did not call log_weight, add_food_entry, or remove_food_entry this "
+    "turn, but your last reply implies something was logged, updated, or removed. If you "
+    "meant to make that change, call the required tool now. Otherwise, rewrite your reply to "
+    "honestly say nothing was changed."
+)
 
 
 async def run_turn(
@@ -231,6 +301,7 @@ async def run_turn(
     settings = get_settings()
     if profile is None:
         profile = await memory.load_profile(user_id)
+    pantry = await memory.load_pantry(user_id)
 
     # Model + provider key are runtime-configurable from the web UI (DB over env).
     model = await settings_store.agent_model(settings.agent_model)
@@ -243,7 +314,7 @@ async def run_turn(
     api_base = await settings_store.agent_api_base(settings.agent_api_base) if is_local_model else None
 
     messages: list[dict] = [
-        {"role": "system", "content": await _system_content(profile, model)}
+        {"role": "system", "content": await _system_content(profile, pantry, model)}
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": _user_content(user_text, image)})
@@ -258,6 +329,8 @@ async def run_turn(
         async with contextlib.AsyncExitStack() as stack:
             tools, dispatch = await _gather_tools(stack, settings, user_id)
 
+            wrote_any = False
+            correction_attempted = False
             for _ in range(MAX_TOOL_ITERATIONS):
                 try:
                     resp = await litellm.acompletion(
@@ -277,8 +350,22 @@ async def run_turn(
 
                 tool_calls = getattr(msg, "tool_calls", None)
                 if not tool_calls:
-                    return (msg.content or "").strip()
-                await _execute_tool_calls(tool_calls, dispatch, messages)
+                    reply = (msg.content or "").strip()
+                    if not wrote_any and _claims_unverified_write(reply):
+                        if not correction_attempted:
+                            # Give the model one chance to either actually call the
+                            # tool or walk back the claim, rather than shipping a
+                            # confident lie straight to the user.
+                            correction_attempted = True
+                            messages.append({"role": "user", "content": _UNVERIFIED_CLAIM_PROMPT})
+                            continue
+                        await memory.record_action(
+                            user_id, source, "unverified_claim", {}, False, reply
+                        )
+                    return reply
+                wrote_any = wrote_any or await _execute_tool_calls(
+                    tool_calls, dispatch, messages, user_id=user_id, source=source
+                )
     except BaseExceptionGroup as eg:
         # AsyncExitStack closes several MCP sessions concurrently on unwind; that
         # can wrap a single real failure (our own AgentError included) in an

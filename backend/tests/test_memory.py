@@ -112,6 +112,61 @@ async def test_chat_history_is_per_user(_db):
     assert all(m["content"] != "not yours" for m in hist)  # user 2 isolated
 
 
+async def test_pantry_crud_and_per_user_isolation(_db):
+    memory = _db
+    chicken = await memory.add_pantry_item(1, "Chicken breast", "always frozen")
+    await memory.add_pantry_item(1, "Quinoa")
+    await memory.add_pantry_item(2, "Not yours")
+
+    items = await memory.load_pantry(1)
+    assert [i.name for i in items] == ["Chicken breast", "Quinoa"]  # alphabetical
+    assert items[0].notes == "always frozen"
+
+    other = await memory.load_pantry(2)
+    assert [i.name for i in other] == ["Not yours"]  # user 2 isolated
+
+    updated = await memory.update_pantry_item(1, chicken.id, name="Chicken thighs", notes="")
+    assert updated.name == "Chicken thighs"
+    assert updated.notes is None  # blank notes clears rather than storing ""
+
+    # Can't update/delete another user's item by guessing its id.
+    assert await memory.update_pantry_item(2, chicken.id, name="Hijacked") is None
+    assert await memory.delete_pantry_item(2, chicken.id) is False
+    assert (await memory.load_pantry(1))[0].name == "Chicken thighs"  # untouched
+
+    assert await memory.delete_pantry_item(1, chicken.id) is True
+    assert [i.name for i in await memory.load_pantry(1)] == ["Quinoa"]
+
+    summary = memory.pantry_summary(await memory.load_pantry(1))
+    assert summary == [{"id": summary[0]["id"], "name": "Quinoa", "notes": None,
+                         "created_at": summary[0]["created_at"]}]
+
+
+async def test_action_log_records_and_is_per_user(_db):
+    memory = _db
+    await memory.record_action(
+        1, "chat", "log_weight", {"value": 322.4, "unit": "lbs"}, True, '{"status": "success"}'
+    )
+    await memory.record_action(
+        1, "proactive", "log_weight", {"value": 322.4}, False, '{"status": "error", "message": "x"}'
+    )
+    await memory.record_action(2, "chat", "log_weight", {"value": 999}, True, "not yours")
+
+    actions = await memory.recent_actions(1)
+    assert len(actions) == 2
+    assert actions[0].tool_name == "log_weight"
+    # Newest first.
+    assert actions[0].success is False
+    assert actions[1].success is True
+
+    summary = memory.action_log_summary(actions)
+    assert summary[0]["arguments"] == {"value": 322.4}
+    assert summary[0]["source"] == "proactive"
+
+    other = await memory.recent_actions(2)
+    assert len(other) == 1  # user 2 isolated from user 1's log
+
+
 def test_memory_tools_registered(_db):
     from agents import memory
 
