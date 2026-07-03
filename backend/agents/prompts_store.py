@@ -59,11 +59,20 @@ Tool use:
   left in the user's budget.
 - Only WRITE to Cronometer (add food, log weight) after the user has agreed to the meal, or when
   they explicitly ask you to log something. Confirm before logging if there's any ambiguity.
-- NEVER tell the user something is logged unless you actually called add_food_entry or
-  log_weight in THIS turn and got a success result back. Do not narrate "Logged!" as a shortcut
-  or assume a call from earlier in the conversation still needs repeating -- call the tool now,
-  and if you're at all unsure whether it already happened, call get_food_log or
-  get_weight_history first to check before saying anything is logged.
+- There is NO tool to edit an existing entry's amount, food, or time. To "change", "update",
+  "correct", or "fix" something already logged, you must: call get_food_log to find its exact
+  servingId, call remove_food_entry with that servingId, then call add_food_entry with the
+  corrected details -- all three calls, in that order, in THIS turn. Changing 100g to 150g means
+  removing the 100g entry and adding a fresh 150g one; it is never a single step, and it is never
+  optional -- skipping the remove leaves the old entry in place alongside (or instead of) the new
+  one.
+- NEVER tell the user something is logged, updated, or removed unless you actually called the
+  required tool(s) (add_food_entry / remove_food_entry / log_weight) in THIS turn and got a
+  success result back for EACH one involved -- for an edit, that means both the remove AND the
+  add succeeded, not just one of them. Do not narrate "Done!" as a shortcut, and do not assume a
+  call from earlier in the conversation still counts. If you're at all unsure whether something
+  already happened, call get_food_log or get_weight_history to check the real current state
+  before saying anything is logged, updated, or removed.
 - Google Health/Fitbit integration is READ-ONLY: you can pull sleep, steps, heart rate, and SpO2
   for context, but you cannot write, sync, or mirror data into it. If asked to push/sync/mirror
   Cronometer data into Google Health, say plainly that you can't do that -- never claim you did.
@@ -132,9 +141,13 @@ PLAN_INSTRUCTION_DEFAULT = (
 )
 
 ANALYZE_INSTRUCTION_DEFAULT = (
-    "Analyze what the user has eaten TODAY. Call get_food_log once for today's "
-    "Cronometer diary (foods, amounts, meal groups, energy_summary, nutrition_summary) "
-    "-- use its real data, don't guess.\n\n"
+    "Analyze what the user has eaten TODAY, using ONLY the food log below -- it is the "
+    "complete, exact list of what was actually logged, already resolved from Cronometer. "
+    "Do not call get_food_log yourself; it won't give you anything this doesn't already "
+    "have. NEVER invent, rename, guess, or generalize a food's identity from its macros "
+    "(e.g. do not call something \"rice\" unless the log literally says rice) -- when you "
+    "name an item, copy its name from the log below exactly.\n\n"
+    "TODAY'S FOOD LOG (time, amount, food):\n{food_log}\n\n"
     "Calorie/protein target: {target}\n"
     "Weight-loss goal: {goals}\n"
     "Health conditions: {conditions}\n"
@@ -146,7 +159,8 @@ ANALYZE_INSTRUCTION_DEFAULT = (
     "weigh how meals are spaced across the day (long gaps, everything back-loaded "
     "late at night, a skipped meal), not just the totals.\n"
     "2. The specific items that hurt the score, each with a one-line reason (over "
-    "target, conflicts with a condition or allergy, poor timing, etc).\n"
+    "target, conflicts with a condition or allergy, poor timing, etc) -- using each "
+    "item's exact name from the food log above.\n"
     "3. One concrete swap/alternative for each flagged item.\n"
     "4. A one-line total: calories/protein consumed vs. target, and calories "
     "remaining.\n"
@@ -201,9 +215,12 @@ PROMPT_REGISTRY: list[PromptSpec] = [
         "analyze_instruction",
         "/analyze instruction",
         "Used by /analyze to rate today's logged meals against the user's target, "
-        "goal, conditions, and allergies.",
+        "goal, conditions, and allergies. {food_log} is the exact, already-resolved "
+        "diary text -- keep it in the template and keep the \"copy the name exactly\" "
+        "instruction, or the model has nothing but macros to guess a food's identity "
+        "from and will confabulate (e.g. calling bulgur \"rice\").",
         ANALYZE_INSTRUCTION_DEFAULT,
-        ("target", "goals", "conditions", "allergies"),
+        ("target", "goals", "conditions", "allergies", "food_log"),
     ),
 ]
 

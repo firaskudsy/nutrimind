@@ -84,3 +84,25 @@ async def test_plain_answer_no_tools(agent_env, monkeypatch):
     monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
     reply = await nutrition_agent.run_turn("hi", user_id=1)
     assert reply == "Hello! How can I help?"
+
+
+async def test_out_of_credits_raises_a_clean_agent_error(agent_env, monkeypatch):
+    """A raw provider exception must never reach the caller -- only AgentError with
+    a message safe to show a user (this is what turns a bare 500 into a real
+    "you're out of credits" message on the web/Telegram surfaces)."""
+    nutrition_agent, _ = agent_env
+
+    async def fake_acompletion(**_kwargs):
+        raise RuntimeError(
+            'litellm.BadRequestError: AnthropicException - {"type":"error","error":'
+            '{"type":"invalid_request_error","message":"Your credit balance is too low '
+            'to access the Anthropic API. Please go to Plans & Billing to upgrade or '
+            'purchase credits."}}'
+        )
+
+    monkeypatch.setattr(nutrition_agent.litellm, "acompletion", fake_acompletion)
+    with pytest.raises(nutrition_agent.AgentError) as excinfo:
+        await nutrition_agent.run_turn("hi", user_id=1)
+    assert "out of credits" in str(excinfo.value)
+    assert "Settings" in str(excinfo.value)
+    assert "BadRequestError" not in str(excinfo.value)  # raw dump must not leak through

@@ -55,27 +55,45 @@ async def _food_details(food_id: int, sem: asyncio.Semaphore) -> tuple[str, dict
     return name, per_100g
 
 
-async def todays_macros(day: date | None = None) -> str:
-    """NET CARBS / FIBER / PROTEIN for `day` (default today), each broken down by item."""
+async def _todays_servings(
+    day: date | None = None,
+) -> tuple[dict | None, list[dict], dict[int, tuple[str, dict[int, float]]]]:
+    """Today's day-level macro totals, raw serving entries, and resolved food names.
+
+    `get_food_log`'s diary entries carry only a numeric foodId, no name -- every
+    caller that needs to talk about specific foods (by name, not just totals)
+    goes through here so that resolution happens once, in Python, rather than
+    leaving the model to guess a food's identity from its macro profile.
+    """
     ref = _ref("cronometer")
     if ref is None:
-        return "Cronometer isn't connected right now."
+        return None, [], {}
 
     day = day or date.today()
     log = _unwrap(await registry.call_tool(ref, "get_food_log", {"date": day.isoformat()}))
     if not isinstance(log, dict):
-        return "Couldn't read today's Cronometer diary."
+        return None, [], {}
 
     macros = ((log.get("nutrition_summary") or {}).get("macros")) or {}
     diary_entries = ((log.get("diary") or {}).get("diary")) or []
     servings = [e for e in diary_entries if e.get("type") == "Serving" and e.get("foodId")]
     if not servings:
-        return "Nothing logged in Cronometer today yet."
+        return macros, [], {}
 
     food_ids = list({e["foodId"] for e in servings})
     sem = asyncio.Semaphore(_CONCURRENCY)
     results = await asyncio.gather(*(_food_details(fid, sem) for fid in food_ids))
     food_data = {fid: r for fid, r in zip(food_ids, results, strict=True) if r is not None}
+    return macros, servings, food_data
+
+
+async def todays_macros(day: date | None = None) -> str:
+    """NET CARBS / FIBER / PROTEIN for `day` (default today), each broken down by item."""
+    macros, servings, food_data = await _todays_servings(day)
+    if macros is None:
+        return "Cronometer isn't connected right now."
+    if not servings:
+        return "Nothing logged in Cronometer today yet."
 
     # Per-item contribution to each macro, in grams; same-named items (e.g. two
     # servings of one dish) are combined into a single line.
@@ -102,3 +120,24 @@ async def todays_macros(day: date | None = None) -> str:
                 lines.append(f"- {name} ({amount:.0f}g)")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+async def todays_food_log_text(day: date | None = None) -> str:
+    """Plain 'time  amount  food name' lines for `day`'s diary (default today).
+
+    For handing to the LLM as ground truth (e.g. /analyze) so it never has to
+    guess a food's identity from foodId alone.
+    """
+    macros, servings, food_data = await _todays_servings(day)
+    if macros is None:
+        return "Cronometer isn't connected right now."
+    if not servings:
+        return "Nothing logged yet today."
+
+    lines = []
+    for entry in sorted(servings, key=lambda e: e["time"]):
+        data = food_data.get(entry["foodId"])
+        name = data[0] if data else f"unresolved food (id {entry['foodId']})"
+        grams = entry.get("grams") or 0
+        lines.append(f"{entry['time']}  {grams:.0f}g  {name}")
+    return "\n".join(lines)

@@ -175,12 +175,19 @@ async def _fetch_sleep(start: date, end: date) -> dict[date, float]:
             if not isinstance(raw, dict):
                 break
             data = raw.get("data") or {}
+            oldest_in_page: date | None = None
             for dp in data.get("dataPoints") or []:
                 night, hrs = _sleep_point(dp)
                 if night is not None:
                     hours[night] += hrs
+                    if oldest_in_page is None or night < oldest_in_page:
+                        oldest_in_page = night
             page_token = data.get("nextPageToken")
-            if not page_token:
+            # Results come back newest-first (empirically -- the API doesn't
+            # otherwise document ordering); each page is its own stdio process
+            # spawn (~1.5s), so stop as soon as we're past `start` rather than
+            # always exhausting the page cap.
+            if not page_token or (oldest_in_page is not None and oldest_in_page <= start):
                 break
     except Exception as exc:  # noqa: BLE001
         logger.warning("trends: sleep fetch failed: %s", exc)

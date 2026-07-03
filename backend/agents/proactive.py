@@ -14,7 +14,7 @@ and layer qualitative, condition-aware judgment (blood markers, injuries) on top
 
 from datetime import date, timedelta
 
-from agents import memory, prompts_store
+from agents import macros, memory, prompts_store
 from agents.nutrition_agent import run_turn
 from agents.trends import _fetch_weight
 
@@ -197,8 +197,12 @@ async def analyze_day(user_id: int) -> str:
     user hasn't set an explicit one (same BMR + weight math, moderate-deficit
     tier) -- otherwise this command would have nothing concrete to score against.
     Everything else (which items hurt the score, alternatives, how meal timing
-    across the day factors in) is left to the model, which pulls today's actual
-    diary via get_food_log rather than trusting anything precomputed here.
+    across the day factors in) is left to the model -- but WHICH foods those are
+    is resolved here, in Python, via macros.todays_food_log_text(). get_food_log's
+    diary entries carry only a numeric foodId, no name, so a model asked to call
+    it and then name specific problem items has nothing but a macro profile to
+    go on and will confabulate a plausible-sounding food (e.g. calling bulgur
+    "rice") rather than admit it doesn't know.
     """
     profile = await memory.load_profile(user_id)
     summary = memory.profile_summary(profile)
@@ -229,6 +233,7 @@ async def analyze_day(user_id: int) -> str:
         goals=summary.get("goals") or "none recorded",
         conditions=summary.get("conditions") or "none recorded",
         allergies=summary.get("allergies") or "none recorded",
+        food_log=await macros.todays_food_log_text(),
     )
     reply = (await run_turn(instruction, user_id=user_id, source="analyze")).strip()
     return reply or "Sorry -- couldn't analyze today's meals right now. Try again in a moment."

@@ -33,6 +33,45 @@ logger = logging.getLogger(__name__)
 litellm.drop_params = True
 
 MAX_TOKENS = 8192
+
+
+class AgentError(RuntimeError):
+    """A completion call failed; message is already safe to show the user."""
+
+
+def _friendly_completion_error(model: str, exc: Exception) -> str:
+    """Turn a raw LiteLLM/provider exception into something worth showing a user.
+
+    Providers wrap real, actionable problems (out of credits, bad key, rate
+    limited) in exception text meant for logs, not chat -- a bare `str(exc)`
+    dumps a JSON error body and a stack-trace-style prefix. Pattern-match the
+    common cases; anything unrecognized still gets a short, non-scary fallback
+    instead of the raw dump.
+    """
+    text = str(exc)
+    low = text.lower()
+    if "credit balance is too low" in low or "insufficient_quota" in low:
+        return (
+            f"The {model} account is out of credits. Add credits or upgrade the plan "
+            "with that provider, or switch models in Settings."
+        )
+    if "invalid x-api-key" in low or "incorrect api key" in low or "authentication_error" in low:
+        return f"The API key for {model} is missing or invalid. Check it in Settings."
+    if "rate_limit" in low or "rate limit" in low:
+        return "The AI provider is rate-limiting requests right now. Try again in a moment."
+    if "overloaded" in low:
+        return "The AI provider is temporarily overloaded. Try again shortly."
+    return f"The AI provider request failed ({model}): {text[:200]}"
+
+
+def _unwrap_exception_group(eg: BaseExceptionGroup) -> BaseException:
+    """The first leaf exception inside a (possibly nested) ExceptionGroup."""
+    exc: BaseException = eg
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 MAX_TOOL_ITERATIONS = 8
 
 
@@ -215,26 +254,36 @@ async def run_turn(
     # without it.
     reasoning_effort = "disable" if is_local_model else None
 
-    async with contextlib.AsyncExitStack() as stack:
-        tools, dispatch = await _gather_tools(stack, settings, user_id)
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            tools, dispatch = await _gather_tools(stack, settings, user_id)
 
-        for _ in range(MAX_TOOL_ITERATIONS):
-            resp = await litellm.acompletion(
-                model=model,
-                api_key=api_key,
-                api_base=api_base,
-                messages=messages,
-                tools=tools or None,
-                max_tokens=MAX_TOKENS,
-                reasoning_effort=reasoning_effort,
-            )
-            await usage.record_from_response(resp, model, source, user_id)
-            msg = resp.choices[0].message
-            messages.append(_assistant_dict(msg))
+            for _ in range(MAX_TOOL_ITERATIONS):
+                try:
+                    resp = await litellm.acompletion(
+                        model=model,
+                        api_key=api_key,
+                        api_base=api_base,
+                        messages=messages,
+                        tools=tools or None,
+                        max_tokens=MAX_TOKENS,
+                        reasoning_effort=reasoning_effort,
+                    )
+                except Exception as exc:  # noqa: BLE001 - normalize into a message safe to show
+                    raise AgentError(_friendly_completion_error(model, exc)) from exc
+                await usage.record_from_response(resp, model, source, user_id)
+                msg = resp.choices[0].message
+                messages.append(_assistant_dict(msg))
 
-            tool_calls = getattr(msg, "tool_calls", None)
-            if not tool_calls:
-                return (msg.content or "").strip()
-            await _execute_tool_calls(tool_calls, dispatch, messages)
+                tool_calls = getattr(msg, "tool_calls", None)
+                if not tool_calls:
+                    return (msg.content or "").strip()
+                await _execute_tool_calls(tool_calls, dispatch, messages)
+    except BaseExceptionGroup as eg:
+        # AsyncExitStack closes several MCP sessions concurrently on unwind; that
+        # can wrap a single real failure (our own AgentError included) in an
+        # ExceptionGroup whose str() is just "unhandled errors in a TaskGroup" --
+        # dig out the actual cause so callers see a real, useful message.
+        raise _unwrap_exception_group(eg) from eg
 
     return "I wasn't able to finish that — try again?"

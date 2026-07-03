@@ -247,9 +247,13 @@ async def web_chat(payload: WebChatIn, user=Depends(authz.require_approved)) -> 
 
     history = await memory.recent_history(user.id, limit=40)
     start = time.monotonic()
-    reply = (
-        await run_turn(payload.message, user_id=user.id, image=image, history=history, source="web")
-    ).strip()
+    try:
+        reply = (
+            await run_turn(payload.message, user_id=user.id, image=image, history=history, source="web")
+        ).strip()
+    except Exception as exc:  # noqa: BLE001 - a clean 502 beats a bare 500
+        logger.exception("web chat turn failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     elapsed = time.monotonic() - start
     await memory.save_message(user.id, "user", payload.message or "(photo)")
     if reply:
@@ -286,14 +290,21 @@ def _day_series(points: dict[date, float], digits: int = 1) -> list[dict]:
 
 @app.get("/api/dashboard")
 async def dashboard(user=Depends(authz.require_approved)) -> dict:
-    """Aggregate data for the dashboard: cost, profile, nutrition, weight/health trends."""
+    """Aggregate data for the dashboard: cost, profile, nutrition, weight/health trends.
+
+    Every fetch here is an independent network call (Cronometer over HTTP,
+    Google Health spawning a fresh stdio process each time) -- run them all
+    concurrently so wall-clock time is the slowest single call, not the sum.
+    """
     profile = memory.profile_summary(await memory.load_profile(user.id))
     unit = profile.get("weight_unit") or "lbs"
-    weights = await _cronometer_tool("get_weight_history", {"unit": unit})
 
     today = date.today()
     start = today - timedelta(days=30)
-    sleep, heart_rate, spo2 = await asyncio.gather(
+    usage_summary, weights, nutrition_today, sleep, heart_rate, spo2 = await asyncio.gather(
+        usage.usage_summary(user.id),
+        _cronometer_tool("get_weight_history", {"unit": unit}),
+        _cronometer_tool("get_daily_nutrition", {}),
         trends._fetch_sleep(start, today),
         trends._fetch_resting_heart_rate(start, today),
         trends._fetch_spo2(start, today),
@@ -309,9 +320,9 @@ async def dashboard(user=Depends(authz.require_approved)) -> dict:
         )
 
     return {
-        "usage": await usage.usage_summary(user.id),
+        "usage": usage_summary,
         "profile": profile,
-        "nutrition_today": await _cronometer_tool("get_daily_nutrition", {}),
+        "nutrition_today": nutrition_today,
         "weights": weights,
         "macro_targets": macro_targets,
         "sleep": _day_series(sleep),

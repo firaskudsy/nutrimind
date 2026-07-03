@@ -134,6 +134,9 @@ export default function Dashboard() {
   ]
     .filter((m) => m.g != null)
     .map((m) => ({ ...m, g: Math.round(m.g) }));
+  // A fresh day with nothing logged yet still has target-only entries (g: 0),
+  // which would otherwise render as an empty-looking chart of bare target bars.
+  const hasConsumedMacros = macroBars.some((m) => m.g > 0);
 
   const name = data?.profile?.name;
   const wUnit = data?.weights?.unit || data?.profile?.weight_unit || "lbs";
@@ -182,7 +185,7 @@ export default function Dashboard() {
           title="Macros today"
           subtitle={targets ? "grams consumed vs. your daily target" : "grams consumed"}
         >
-          {macroBars.length ? (
+          {hasConsumedMacros ? (
             <>
               {targets && (
                 <div className="mb-3 flex items-center gap-4 text-xs text-muted">
